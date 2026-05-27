@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "squarFT User",
-    "slug": "squarft-user",
+    "name": "SquarFT Field Officer",
+    "slug": "squarft-field-officer",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icons/app-icon.png",
-    "scheme": "squarftuser",
+    "scheme": "squarftfieldofficer",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -17,7 +17,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.kartik2611mishra.squarftuser"
+      "package": "com.kartik2611mishra.squarftfieldofficer"
     },
     "web": {
       "output": "static",
