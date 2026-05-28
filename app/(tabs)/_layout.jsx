@@ -1,5 +1,8 @@
+import { Image } from "expo-image";
 import { Tabs } from "expo-router";
-import { Image, Platform } from "react-native";
+import { Platform, Text } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSelector } from "react-redux";
 
 const icons = {
     home: {
@@ -26,66 +29,89 @@ const icons = {
 
 function TabIcon({ name, focused, size }) {
     const icon = icons[name];
-    const activeSize = size?.active ?? { width: 54, height: 54 };
-    const inactiveSize = size?.inactive ?? { width: 28, height: 28 };
+    const activeSize = size?.active ?? { width: 44, height: 44 };
+    const inactiveSize = size?.inactive ?? { width: 24, height: 24 };
     return (
         <Image
             source={focused ? icon.active : icon.inactive}
             style={[focused ? activeSize : inactiveSize]}
-            resizeMode="contain"
+            contentFit="contain"
+            transition={0}
         />
     );
 }
 
 export default function TabsLayout() {
+    const searchActive = useSelector((state) => state.app.searchActive);
+    const insets = useSafeAreaInsets();
+    const androidBottomInset = Platform.OS === "android" ? Math.max(insets.bottom, 0) : 0;
+    const iosBottomPadding = Platform.OS === "ios" ? Math.max(insets.bottom - 8, 6) : 8;
+
     return (
         <Tabs
             screenOptions={{
                 tabBarShowLabel: false,
-                tabBarStyle: {
-                    borderTopRightRadius: 50,
-                    borderTopLeftRadius: 50,
-                    borderTopColor: "transparent",
-                    backgroundColor: "#fff",
-                    paddingTop: 25,
-                    paddingHorizontal: 15,
-                    height: Platform.OS === "ios" ? 95 : 90,
-                    shadowColor: "#000",
-                    shadowOffset: {
-                        width: 0,
-                        height: 2,
-                    },
-                    shadowOpacity: 0.15,
-                    shadowRadius: 3.84,
-                    elevation: 5,
-                },
+                tabBarStyle: searchActive
+                    ? { display: "none" }
+                    : {
+                          position: "absolute",
+                          left: 0,
+                          right: 0,
+                          bottom: Platform.OS === "ios" ? 0 : androidBottomInset - 1,
+                          borderTopRightRadius: 45,
+                          borderTopLeftRadius: 45,
+                          borderTopColor: "transparent",
+                          backgroundColor: "#fff",
+                          paddingTop: 15,
+                          paddingHorizontal: 15,
+                          paddingBottom: iosBottomPadding,
+                          height: Platform.OS === "ios" ? 85 : 80,
+                          ...Platform.select({
+                              ios: {
+                                  shadowColor: "#000",
+                                  shadowOffset: { width: 0, height: 2 },
+                                  shadowOpacity: 0.25,
+                                  shadowRadius: 4,
+                              },
+                              android: {
+                                  elevation: 10,
+                              },
+                          }),
+                      },
             }}
         >
             <Tabs.Screen
                 name="home"
                 options={{
-                    headerTitle: "Home",
+                    headerShown: false,
                     tabBarIcon: ({ focused }) => <TabIcon name="home" focused={focused} />,
                 }}
             />
             <Tabs.Screen
                 name="favourite"
                 options={{
-                    headerTitle: "Favourite",
+                    headerTitle: "My Activity",
+                    headerTitleAlign: "center",
+                    headerShadowVisible: false,
+                    headerStyle: {
+                        borderBottomWidth: 1,
+                        borderBottomColor: "rgba(0,0,0,0.06)",
+                    },
                     tabBarIcon: ({ focused }) => <TabIcon name="favourite" focused={focused} />,
                 }}
             />
             <Tabs.Screen
                 name="book"
                 options={{
-                    headerTitle: "Book",
+                    headerTitle: "Book a site visit",
+                    headerTitleAlign: "center",
                     tabBarIcon: ({ focused }) => (
                         <TabIcon
                             name="book"
                             focused={focused}
                             size={{
-                                active: { width: 64, height: 64, position: "absolute", bottom: 5 },
-                                inactive: { width: 64, height: 64, position: "absolute", bottom: 5 },
+                                active: { width: 56, height: 56, position: "absolute", bottom: 0 },
+                                inactive: { width: 56, height: 56, position: "absolute", bottom: 0 },
                             }}
                         />
                     ),
@@ -94,14 +120,21 @@ export default function TabsLayout() {
             <Tabs.Screen
                 name="discount"
                 options={{
-                    headerTitle: "Discount",
+                    headerShown: false,
                     tabBarIcon: ({ focused }) => <TabIcon name="discount" focused={focused} />,
                 }}
             />
             <Tabs.Screen
                 name="settings"
                 options={{
-                    headerTitle: "Settings",
+                    headerTitle: "",
+                    headerLeft: () => (
+                        <Text style={{ fontSize: 22, fontWeight: "700", color: "#0F172A", marginLeft: 20 }}>
+                            Profile
+                        </Text>
+                    ),
+                    headerStyle: { backgroundColor: "#F3F4F6" },
+                    headerShadowVisible: false,
                     tabBarIcon: ({ focused }) => <TabIcon name="settings" focused={focused} />,
                 }}
             />
