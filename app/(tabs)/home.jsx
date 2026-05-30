@@ -3,7 +3,8 @@ import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
 import { Image, Linking, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { followUps, meetings } from "../../data/homeData";
+import { useSelector } from "react-redux";
+import { selectAllProjectFollowUps, selectAllProjectMeetings } from "../../store/slices/projectsSlice";
 
 const profileImage = require("../../assets/images/profile-officer.png");
 
@@ -71,6 +72,8 @@ function openMapLocation(latitude, longitude) {
 
 export default function Home() {
     const [activeTab, setActiveTab] = useState("meeting");
+    const followUps = useSelector(selectAllProjectFollowUps);
+    const meetings = useSelector(selectAllProjectMeetings);
     const { width } = useWindowDimensions();
     const notchWidth = Math.min(width * 0.250, 102);
     const notchHeight = 16;
