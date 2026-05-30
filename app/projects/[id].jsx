@@ -1,0 +1,1103 @@
+import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView, BottomSheetTextInput } from "@gorhom/bottom-sheet";
+import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
+import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Linking, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useDispatch, useSelector } from "react-redux";
+import { addProjectFollowUp, addProjectMeeting, selectProjectById } from "../../store/slices/projectsSlice";
+
+const typeStyles = {
+    Hot: { bg: "#FEE2E2", text: "#B91C1C" },
+    Warm: { bg: "#FFEDD5", text: "#C2410C" },
+    Cold: { bg: "#DBEAFE", text: "#2563EB" },
+};
+
+const statusStyles = {
+    followUp: { bg: "#FFF7ED", text: "#EA580C" },
+    meeting: { bg: "#F1EFFF", text: "#4A43EC" },
+};
+
+const documentToneStyles = {
+    success: { bg: "#DCFCE7", text: "#16A34A" },
+    warning: { bg: "#FEF3C7", text: "#D97706" },
+    danger: { bg: "#FFEDD5", text: "#DC2626" },
+};
+
+const stepStatusStyles = {
+    Done: { bg: "#DCFCE7", text: "#16A34A" },
+    Pending: { bg: "#FEF3C7", text: "#D97706" },
+    "Not Started": { bg: "#FFEDD5", text: "#DC2626" },
+    Waiting: { bg: "#F1F5F9", text: "#94A3B8" },
+};
+
+const followUpToneStyles = {
+    danger: { badgeBg: "#FEE2E2", badgeText: "#B91C1C" },
+    hot: { badgeBg: "#FFEDD5", badgeText: "#C2410C" },
+    warning: { badgeBg: "#FEF3C7", badgeText: "#B45309" },
+};
+
+const meetingToneStyles = {
+    primary: { badgeBg: "#F1EFFF", badgeText: "#4A43EC" },
+    success: { badgeBg: "#DCFCE7", badgeText: "#16A34A" },
+};
+
+const followUpTypes = ["Call", "Site Visit", "Office Visit", "Video Call"];
+const followUpOutcomes = [
+    "No Response",
+    "Call Later",
+    "Builder Busy",
+    "Interested",
+    "Need More Time",
+    "Meeting Required",
+    "Site Visit Required",
+    "Documents Asked",
+    "Pricing Discussion Pending",
+    "Not Interested",
+    "Onboarding Ready",
+];
+const followUpActions = ["Schedule another call", "Schedule meeting", "Send company profile", "Collect documents", "Start onboarding"];
+const followUpStatuses = ["Hot", "Warm", "Docs Pending", "Overdue", "Done"];
+const meetingTypes = ["Site Meeting", "Builder Office", "SquarFT Office", "Phone", "Video Call"];
+const meetingStatuses = ["Scheduled", "Today", "Tomorrow", "Planned", "Done"];
+const meetingAgenda = ["Company Introduction", "Project Collaboration Discussion", "Pricing Discussion", "Inventory Collection", "Document Collection"];
+const reminderOptions = ["30 minutes before", "1 hour before", "2 hours before", "1 day before"];
+
+async function openUrl(url) {
+    const supported = await Linking.canOpenURL(url);
+    if (supported) {
+        await Linking.openURL(url);
+    }
+}
+
+function ProgressBar({ value, color = "#4A43EC", trackColor = "#E5E7EB", height = 6 }) {
+    return (
+        <View className="mt-2 overflow-hidden rounded-full" style={{ height, backgroundColor: trackColor }}>
+            <View className="h-full rounded-full" style={{ width: `${value}%`, backgroundColor: color }} />
+        </View>
+    );
+}
+
+function Section({ title, children, action }) {
+    return (
+        <View className="mb-2.5 rounded-[12px] border border-[#E5E7EB] bg-white p-3">
+            <View className="mb-2.5 flex-row items-center justify-between">
+                <Text className="text-[10px] font-lato-bold uppercase tracking-[1.5px] text-[#64748B]">{title}</Text>
+                {action}
+            </View>
+            {children}
+        </View>
+    );
+}
+
+function Badge({ label, styleSet }) {
+    return (
+        <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: styleSet.bg }}>
+            <Text className="text-[9px] font-lato-bold" style={{ color: styleSet.text }}>
+                {label}
+            </Text>
+        </View>
+    );
+}
+
+function formatDate(date) {
+    return date.toLocaleDateString("en-GB").replace(/\//g, "-");
+}
+
+function formatTime(date) {
+    return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+function buildDateTime(dateValue, timeValue) {
+    const nextDate = new Date(dateValue);
+    nextDate.setHours(timeValue.getHours());
+    nextDate.setMinutes(timeValue.getMinutes());
+    nextDate.setSeconds(0);
+    nextDate.setMilliseconds(0);
+    return nextDate;
+}
+
+function openNativeDateTimePicker({ value, mode, onChange }) {
+    if (Platform.OS === "android") {
+        DateTimePickerAndroid.open({
+            value,
+            mode,
+            display: "default",
+            onChange: (event, selectedValue) => {
+                if (event.type === "set" && selectedValue) {
+                    onChange(selectedValue);
+                }
+            },
+        });
+        return true;
+    }
+
+    return false;
+}
+
+function FormLabel({ children }) {
+    return <Text className="mb-1.5 mt-3 text-[10px] font-lato-bold text-[#475569]">{children}</Text>;
+}
+
+function SheetInput({ value, onChangeText, placeholder, multiline = false }) {
+    return (
+        <BottomSheetTextInput
+            value={value}
+            onChangeText={onChangeText}
+            placeholder={placeholder}
+            placeholderTextColor="#94A3B8"
+            multiline={multiline}
+            textAlignVertical={multiline ? "top" : "center"}
+            className={`rounded-[10px] border border-[#E2E8F0] bg-white px-3 text-[11px] text-[#111827] ${
+                multiline ? "h-20 py-2.5" : "h-10"
+            }`}
+        />
+    );
+}
+
+function ChoiceChip({ label, active, icon, onPress }) {
+    return (
+        <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={onPress}
+            className={`mb-2 mr-2 h-8 flex-row items-center justify-center rounded-full border px-3 ${
+                active ? "border-[#4A43EC] bg-[#4A43EC]" : "border-[#E2E8F0] bg-white"
+            }`}
+        >
+            {icon ? <Ionicons name={icon} size={12} color={active ? "#fff" : "#475569"} /> : null}
+            <Text className={`text-[10px] font-lato-bold ${icon ? "ml-1" : ""} ${active ? "text-white" : "text-[#475569]"}`}>
+                {label}
+            </Text>
+        </TouchableOpacity>
+    );
+}
+
+function RadioRow({ label, active, onPress }) {
+    return (
+        <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={onPress}
+            className="mb-2 h-10 flex-row items-center rounded-[10px] border border-[#E2E8F0] bg-white px-3"
+        >
+            <View className={`h-4 w-4 items-center justify-center rounded-full border ${active ? "border-[#4A43EC]" : "border-[#CBD5E1]"}`}>
+                {active ? <View className="h-2 w-2 rounded-full bg-[#4A43EC]" /> : null}
+            </View>
+            <Text className="ml-2 text-[11px] text-[#111827]">{label}</Text>
+        </TouchableOpacity>
+    );
+}
+
+function CheckRow({ label, active, onPress }) {
+    return (
+        <TouchableOpacity activeOpacity={0.85} onPress={onPress} className="mb-2 flex-row items-center">
+            <View
+                className={`h-4 w-4 items-center justify-center rounded-[4px] border ${
+                    active ? "border-[#4A43EC] bg-[#4A43EC]" : "border-[#CBD5E1] bg-white"
+                }`}
+            >
+                {active ? <Ionicons name="checkmark" size={11} color="#fff" /> : null}
+            </View>
+            <Text className="ml-2 text-[11px] text-[#111827]">{label}</Text>
+        </TouchableOpacity>
+    );
+}
+
+function SelectBox({ value, placeholder, options, open, onToggle, onSelect }) {
+    return (
+        <View>
+            <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={onToggle}
+                className={`h-10 flex-row items-center justify-between rounded-[10px] border bg-white px-3 ${
+                    open ? "border-[#4A43EC]" : "border-[#E2E8F0]"
+                }`}
+            >
+                <Text className={`text-[11px] ${value ? "text-[#111827]" : "text-[#64748B]"}`}>{value || placeholder}</Text>
+                <Ionicons name={open ? "chevron-up" : "chevron-down"} size={14} color="#64748B" />
+            </TouchableOpacity>
+            {open ? (
+                <View className="-mt-1 overflow-hidden rounded-b-[10px] border border-[#4A43EC] bg-white">
+                    {[placeholder, ...options].map((option, index) => {
+                        const isPlaceholder = index === 0;
+                        const isActive = (!value && isPlaceholder) || value === option;
+
+                        return (
+                            <TouchableOpacity
+                                key={option}
+                                activeOpacity={0.85}
+                                onPress={() => onSelect(isPlaceholder ? "" : option)}
+                                className={`px-3 py-2 ${isActive ? "bg-[#2563D8]" : "bg-white"}`}
+                            >
+                                <Text className={`text-[11px] ${isActive ? "text-white" : "text-[#111827]"}`}>{option}</Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+            ) : null}
+        </View>
+    );
+}
+
+function DateTimeField({ value, icon, onPress }) {
+    return (
+        <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={onPress}
+            className="h-10 flex-row items-center justify-between rounded-[10px] border border-[#E2E8F0] bg-white px-3"
+        >
+            <Text className="text-[11px] text-[#111827]">{value}</Text>
+            <Ionicons name={icon} size={14} color="#111827" />
+        </TouchableOpacity>
+    );
+}
+
+function DateTimePickerModal({ visible, value, mode, onChange, onClose }) {
+    if (!visible) return null;
+
+    return (
+        <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+            <View className="flex-1 justify-end bg-black/35">
+                <View className="rounded-t-[18px] bg-white px-4 pb-5 pt-3">
+                    <View className="mb-3 flex-row items-center justify-between">
+                        <TouchableOpacity activeOpacity={0.8} onPress={onClose} className="h-9 justify-center">
+                            <Text className="text-[13px] font-lato-bold text-[#64748B]">Cancel</Text>
+                        </TouchableOpacity>
+                        <Text className="text-[14px] font-lato-bold text-[#111827]">
+                            Select {mode === "date" ? "Date" : "Time"}
+                        </Text>
+                        <TouchableOpacity activeOpacity={0.8} onPress={onClose} className="h-9 justify-center">
+                            <Text className="text-[13px] font-lato-bold text-[#4A43EC]">Done</Text>
+                        </TouchableOpacity>
+                    </View>
+                    <DateTimePicker
+                        value={value}
+                        mode={mode}
+                        display={Platform.OS === "ios" ? "spinner" : "default"}
+                        textColor="#111827"
+                        themeVariant="light"
+                        accentColor="#4A43EC"
+                        onChange={(event, selectedValue) => {
+                            if (selectedValue) onChange(selectedValue);
+                            if (Platform.OS !== "ios") onClose();
+                        }}
+                    />
+                </View>
+            </View>
+        </Modal>
+    );
+}
+
+function ProjectContextCard({ project }) {
+    return (
+        <View className="rounded-[12px] border border-[#DDE2FF] bg-[#F1EFFF] p-3">
+            <Text className="text-[10px] text-[#4A43EC]">Project</Text>
+            <Text className="mt-1 text-[12px] font-lato-bold text-[#312E81]" numberOfLines={1}>
+                {project.projectName} . {project.developerName}
+            </Text>
+        </View>
+    );
+}
+
+function FollowUpForm({ project, onSave }) {
+    const [followUpType, setFollowUpType] = useState(followUpTypes[0]);
+    const [outcome, setOutcome] = useState("");
+    const [outcomeOpen, setOutcomeOpen] = useState(false);
+    const [followUpStatus, setFollowUpStatus] = useState(project.type === "Hot" ? "Hot" : "Warm");
+    const [statusOpen, setStatusOpen] = useState(false);
+    const [remarks, setRemarks] = useState("");
+    const [nextAction, setNextAction] = useState(followUpActions[0]);
+    const [nextDate, setNextDate] = useState(new Date());
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [showTimePicker, setShowTimePicker] = useState(false);
+    const [sitePhoto, setSitePhoto] = useState(null);
+
+    const pickSitePhoto = async () => {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+        if (!permission.granted) return;
+
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            quality: 0.75,
+        });
+
+        if (!result.canceled) {
+            setSitePhoto(result.assets[0]);
+        }
+    };
+
+    const handleSave = () => {
+        onSave({
+            id: `followup-${project.id}-${Date.now()}`,
+            projectId: project.id,
+            projectName: project.projectName,
+            builderName: project.developerName,
+            developerName: project.developerName,
+            projectLocation: project.location,
+            city: project.city,
+            phoneNumber: project.phoneNumber,
+            time: formatTime(nextDate),
+            note: remarks.trim() || nextAction,
+            status: followUpStatus,
+            tone: followUpStatus === "Overdue" ? "danger" : followUpStatus === "Hot" ? "hot" : "warning",
+            meta: {
+                followUpType,
+                outcome,
+                followUpStatus,
+                nextAction,
+                nextFollowUpAt: nextDate.toISOString(),
+                sitePhoto,
+            },
+        });
+    };
+
+    return (
+        <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}>
+            <View className="mb-3 h-1.5 w-10 self-center rounded-full bg-[#CBD5E1]" />
+            <Text className="mb-3 text-[16px] font-lato-bold text-[#111827]">Add Follow-up</Text>
+            <ProjectContextCard project={project} />
+
+            <FormLabel>Follow-up Type</FormLabel>
+            <View className="flex-row flex-wrap">
+                {followUpTypes.map((type, index) => (
+                    <ChoiceChip
+                        key={type}
+                        label={type}
+                        active={followUpType === type}
+                        icon={index === 0 ? "call-outline" : undefined}
+                        onPress={() => setFollowUpType(type)}
+                    />
+                ))}
+            </View>
+
+            <FormLabel>Outcome</FormLabel>
+            <SelectBox
+                value={outcome}
+                placeholder="Select outcome..."
+                options={followUpOutcomes}
+                open={outcomeOpen}
+                onToggle={() => setOutcomeOpen((value) => !value)}
+                onSelect={(value) => {
+                    setOutcome(value);
+                    setOutcomeOpen(false);
+                }}
+            />
+
+            <FormLabel>Follow-up Status</FormLabel>
+            <SelectBox
+                value={followUpStatus}
+                placeholder="Select status..."
+                options={followUpStatuses}
+                open={statusOpen}
+                onToggle={() => setStatusOpen((value) => !value)}
+                onSelect={(value) => {
+                    setFollowUpStatus(value || followUpStatuses[0]);
+                    setStatusOpen(false);
+                }}
+            />
+
+            <FormLabel>Remarks</FormLabel>
+            <SheetInput
+                value={remarks}
+                onChangeText={setRemarks}
+                multiline
+                placeholder="e.g. Builder said partner is out of station. Need to call again on Monday."
+            />
+
+            <FormLabel>Next Action</FormLabel>
+            {followUpActions.map((action, index) => (
+                <RadioRow key={action} label={action} active={nextAction === action} onPress={() => setNextAction(action)} />
+            ))}
+
+            <FormLabel>Next Follow-up Date & Time</FormLabel>
+            <View className="flex-row">
+                <View className="mr-2 flex-1">
+                    <DateTimeField
+                        value={formatDate(nextDate)}
+                        icon="calendar-outline"
+                        onPress={() => {
+                            const opened = openNativeDateTimePicker({
+                                value: nextDate,
+                                mode: "date",
+                                onChange: (selectedDate) => setNextDate(buildDateTime(selectedDate, nextDate)),
+                            });
+                            if (!opened) setShowDatePicker(true);
+                        }}
+                    />
+                </View>
+                <View className="flex-1">
+                    <DateTimeField
+                        value={formatTime(nextDate)}
+                        icon="time-outline"
+                        onPress={() => {
+                            const opened = openNativeDateTimePicker({
+                                value: nextDate,
+                                mode: "time",
+                                onChange: (selectedTime) => setNextDate(buildDateTime(nextDate, selectedTime)),
+                            });
+                            if (!opened) setShowTimePicker(true);
+                        }}
+                    />
+                </View>
+            </View>
+            <DateTimePickerModal
+                visible={showDatePicker}
+                value={nextDate}
+                mode="date"
+                onChange={(selectedDate) => setNextDate(buildDateTime(selectedDate, nextDate))}
+                onClose={() => setShowDatePicker(false)}
+            />
+            <DateTimePickerModal
+                visible={showTimePicker}
+                value={nextDate}
+                mode="time"
+                onChange={(selectedTime) => setNextDate(buildDateTime(nextDate, selectedTime))}
+                onClose={() => setShowTimePicker(false)}
+            />
+
+            <TouchableOpacity activeOpacity={0.85} className="mt-3 rounded-[10px] bg-[#F1F3FA] p-3">
+                <View className="flex-row items-center">
+                    <Ionicons name="mic-outline" size={17} color="#4A43EC" />
+                    <View className="ml-2">
+                        <Text className="text-[11px] font-lato-bold text-[#111827]">Add Voice Note</Text>
+                        <Text className="text-[9px] text-[#64748B]">Tap to record</Text>
+                    </View>
+                </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity activeOpacity={0.85} onPress={pickSitePhoto} className="mt-2 rounded-[10px] bg-[#F1F3FA] p-3">
+                <View className="flex-row items-center">
+                    <Ionicons name="camera-outline" size={17} color="#4A43EC" />
+                    <View className="ml-2">
+                        <Text className="text-[11px] font-lato-bold text-[#111827]">Add Site Photo Proof</Text>
+                        <Text className="text-[9px] text-[#64748B]">
+                            {sitePhoto ? sitePhoto.fileName || "Photo selected" : "With auto location + timestamp"}
+                        </Text>
+                    </View>
+                </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity activeOpacity={0.9} onPress={handleSave} className="mt-4 h-11 flex-row items-center justify-center rounded-[10px] bg-[#16A34A]">
+                <Ionicons name="checkmark" size={14} color="#fff" />
+                <Text className="ml-1.5 text-[12px] font-lato-bold text-white">Save Follow-up</Text>
+            </TouchableOpacity>
+        </BottomSheetScrollView>
+    );
+}
+
+function MeetingForm({ project, onSave }) {
+    const [meetingType, setMeetingType] = useState(meetingTypes[0]);
+    const [meetingStatus, setMeetingStatus] = useState("Scheduled");
+    const [statusOpen, setStatusOpen] = useState(false);
+    const [meetingDate, setMeetingDate] = useState(new Date());
+    const [meetingTime, setMeetingTime] = useState(new Date());
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [showTimePicker, setShowTimePicker] = useState(false);
+    const [location, setLocation] = useState(project.location);
+    const [selectedAgenda, setSelectedAgenda] = useState([meetingAgenda[0]]);
+    const [notes, setNotes] = useState("");
+    const [reminder, setReminder] = useState(reminderOptions[0]);
+    const [reminderOpen, setReminderOpen] = useState(false);
+
+    const toggleAgenda = (agenda) => {
+        setSelectedAgenda((items) => (items.includes(agenda) ? items.filter((item) => item !== agenda) : [...items, agenda]));
+    };
+
+    const handleSave = () => {
+        const scheduledAt = buildDateTime(meetingDate, meetingTime);
+
+        onSave({
+            id: `meeting-${project.id}-${Date.now()}`,
+            projectId: project.id,
+            projectName: project.projectName,
+            developerName: project.developerName,
+            phoneNumber: project.phoneNumber,
+            location: location.trim() || project.location,
+            latitude: project.latitude ?? 22.7533,
+            longitude: project.longitude ?? 75.8937,
+            type: meetingType,
+            time: formatTime(scheduledAt),
+            status: meetingStatus,
+            tone: "primary",
+            meta: {
+                scheduledAt: scheduledAt.toISOString(),
+                agenda: selectedAgenda,
+                notes,
+                reminder,
+                meetingStatus,
+            },
+        });
+    };
+
+    return (
+        <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}>
+            <View className="mb-3 h-1.5 w-10 self-center rounded-full bg-[#CBD5E1]" />
+            <Text className="mb-3 text-[16px] font-lato-bold text-[#111827]">Schedule Meeting</Text>
+            <ProjectContextCard project={project} />
+
+            <FormLabel>Meeting Type</FormLabel>
+            <View className="flex-row flex-wrap">
+                {meetingTypes.map((type, index) => (
+                    <ChoiceChip key={type} label={type} active={meetingType === type} onPress={() => setMeetingType(type)} />
+                ))}
+            </View>
+
+            <FormLabel>Meeting Status</FormLabel>
+            <SelectBox
+                value={meetingStatus}
+                placeholder="Select status..."
+                options={meetingStatuses}
+                open={statusOpen}
+                onToggle={() => setStatusOpen((value) => !value)}
+                onSelect={(value) => {
+                    setMeetingStatus(value || meetingStatuses[0]);
+                    setStatusOpen(false);
+                }}
+            />
+
+            <View className="flex-row">
+                <View className="mr-2 flex-1">
+                    <FormLabel>Date</FormLabel>
+                    <DateTimeField
+                        value={formatDate(meetingDate)}
+                        icon="calendar-outline"
+                        onPress={() => {
+                            const opened = openNativeDateTimePicker({
+                                value: meetingDate,
+                                mode: "date",
+                                onChange: setMeetingDate,
+                            });
+                            if (!opened) setShowDatePicker(true);
+                        }}
+                    />
+                </View>
+                <View className="flex-1">
+                    <FormLabel>Time</FormLabel>
+                    <DateTimeField
+                        value={formatTime(meetingTime)}
+                        icon="time-outline"
+                        onPress={() => {
+                            const opened = openNativeDateTimePicker({
+                                value: meetingTime,
+                                mode: "time",
+                                onChange: setMeetingTime,
+                            });
+                            if (!opened) setShowTimePicker(true);
+                        }}
+                    />
+                </View>
+            </View>
+            <DateTimePickerModal
+                visible={showDatePicker}
+                value={meetingDate}
+                mode="date"
+                onChange={setMeetingDate}
+                onClose={() => setShowDatePicker(false)}
+            />
+            <DateTimePickerModal
+                visible={showTimePicker}
+                value={meetingTime}
+                mode="time"
+                onChange={setMeetingTime}
+                onClose={() => setShowTimePicker(false)}
+            />
+
+            <FormLabel>Location / Address</FormLabel>
+            <SheetInput value={location} onChangeText={setLocation} placeholder="Site address or meeting location" />
+
+            <FormLabel>Agenda</FormLabel>
+            {meetingAgenda.map((agenda, index) => (
+                <CheckRow key={agenda} label={agenda} active={selectedAgenda.includes(agenda)} onPress={() => toggleAgenda(agenda)} />
+            ))}
+
+            <FormLabel>Notes / Preparation</FormLabel>
+            <SheetInput value={notes} onChangeText={setNotes} multiline placeholder="Things to prepare, bring, or discuss..." />
+
+            <FormLabel>Reminder</FormLabel>
+            <SelectBox
+                value={reminder}
+                placeholder="Select reminder..."
+                options={reminderOptions}
+                open={reminderOpen}
+                onToggle={() => setReminderOpen((value) => !value)}
+                onSelect={(value) => {
+                    setReminder(value || reminderOptions[0]);
+                    setReminderOpen(false);
+                }}
+            />
+
+            <TouchableOpacity activeOpacity={0.9} onPress={handleSave} className="mt-4 h-11 flex-row items-center justify-center rounded-[10px] bg-[#4A43EC]">
+                <Ionicons name="calendar-outline" size={14} color="#fff" />
+                <Text className="ml-1.5 text-[12px] font-lato-bold text-white">Schedule Meeting</Text>
+            </TouchableOpacity>
+        </BottomSheetScrollView>
+    );
+}
+
+function ProjectJourney({ items }) {
+    return (
+        <Section title="Project Journey">
+            {items.map((item, index) => {
+                const isDone = item.state === "done";
+                const isCurrent = item.state === "current";
+                const circleClass = isDone
+                    ? "border-[#DCFCE7] bg-[#DCFCE7]"
+                    : isCurrent
+                      ? "border-[#4A43EC] bg-white"
+                      : "border-[#E5E7EB] bg-white";
+                const iconName = isDone ? "checkmark" : isCurrent ? "time-outline" : "ellipse-outline";
+                const iconColor = isDone ? "#16A34A" : isCurrent ? "#4A43EC" : "#CBD5E1";
+
+                return (
+                    <View key={item.label} className="flex-row">
+                        <View className="items-center">
+                            <View className={`h-6 w-6 items-center justify-center rounded-full border ${circleClass}`}>
+                                <Ionicons name={iconName} size={12} color={iconColor} />
+                            </View>
+                            {index < items.length - 1 ? <View className="h-8 w-px bg-[#E5E7EB]" /> : null}
+                        </View>
+                        <View className="ml-3 flex-1 pb-3">
+                            <Text
+                                className={`text-[12px] font-lato-bold ${
+                                    isCurrent ? "text-[#4A43EC]" : item.state === "upcoming" ? "text-[#A1A1AA]" : "text-[#111827]"
+                                }`}
+                            >
+                                {item.label}
+                            </Text>
+                            <Text className="mt-0.5 text-[10px] text-[#94A3B8]">{item.note}</Text>
+                        </View>
+                    </View>
+                );
+            })}
+        </Section>
+    );
+}
+
+function Overview({ project }) {
+    const typeStyle = typeStyles[project.type] ?? typeStyles.Warm;
+
+    return (
+        <View className="px-4 pt-3">
+            <ProjectJourney items={project.journey} />
+
+            <View className="mb-3 flex-row">
+                <View className="mr-2.5 w-[34%] rounded-[12px] border border-[#E5E7EB] bg-white p-3">
+                    <View className="mx-auto h-12 w-12 items-center justify-center rounded-full border-[5px] border-[#4A43EC]">
+                        <Text className="text-[14px] font-lato-bold text-[#4A43EC]">{project.leadScore}</Text>
+                    </View>
+                    <Text className="mt-2 text-center text-[10px] font-lato-bold text-[#4A43EC]">Lead Score</Text>
+                    <Text className="mt-0.5 text-center text-[9px] text-[#94A3B8]">{project.leadProbability}</Text>
+                </View>
+
+                <View className="flex-1 rounded-[12px] border border-[#E5E7EB] bg-white p-3">
+                    <View className="flex-row items-center justify-between">
+                        <Text className="text-[10px] font-lato-bold uppercase tracking-[1px] text-[#64748B]">
+                            Relationship Health
+                        </Text>
+                        <Text className="text-[12px] font-lato-bold text-[#16A34A]">{project.relationshipHealth}%</Text>
+                    </View>
+                    <ProgressBar value={project.relationshipHealth} color="#22C55E" />
+                    <Text className="mt-2 text-[10px] text-[#64748B]">{project.relationshipNote}</Text>
+                    <View className="mt-2 flex-row flex-wrap">
+                        {project.relationshipTags.map((tag) => (
+                            <View key={tag} className="mb-1 mr-2 rounded-full bg-[#DCFCE7] px-2 py-1">
+                                <Text className="text-[9px] font-semibold text-[#16A34A]">{tag}</Text>
+                            </View>
+                        ))}
+                    </View>
+                </View>
+            </View>
+
+            <Section title="Project Info">
+                {[
+                    ["Builder", project.developerName],
+                    ["Type", project.projectType],
+                    ["Contact", project.phoneNumber],
+                    ["Source", project.source],
+                    ["Added", project.addedOn],
+                    ["Lead Type", project.type],
+                ].map(([label, value]) => (
+                    <View key={label} className="flex-row justify-between border-b border-[#F1F5F9] py-2 last:border-b-0">
+                        <Text className="text-[11px] text-[#64748B]">{label}</Text>
+                        <Text className="ml-4 flex-1 text-right text-[11px] font-lato-bold text-[#111827]">{value}</Text>
+                    </View>
+                ))}
+                <View className="mt-1 self-end">
+                    <Badge label={project.type} styleSet={typeStyle} />
+                </View>
+            </Section>
+
+            <Section
+                title="Onboarding Progress"
+                action={<Text className="text-[13px] font-lato-bold text-[#4A43EC]">{project.onboardingProgress}%</Text>}
+            >
+                <ProgressBar value={project.onboardingProgress} color="#4A43EC" trackColor="#DDE1EA" height={7} />
+                <View className="mt-3">
+                    {project.onboardingSteps.map((step) => {
+                        const stepStyle = stepStatusStyles[step.status] ?? stepStatusStyles.Pending;
+
+                        return (
+                            <View key={step.label} className="flex-row items-center justify-between border-b border-[#F1F5F9] py-2">
+                                <Text className="text-[11px] text-[#111827]">{step.label}</Text>
+                                <Badge label={step.status} styleSet={stepStyle} />
+                            </View>
+                        );
+                    })}
+                </View>
+                <TouchableOpacity activeOpacity={0.85} className="mt-3 h-10 items-center justify-center rounded-[10px] bg-[#4A43EC]">
+                    <Text className="text-[12px] font-lato-bold text-white">Continue Onboarding {">"}</Text>
+                </TouchableOpacity>
+            </Section>
+
+            <Section
+                title="Documents"
+                action={
+                    <TouchableOpacity activeOpacity={0.8} className="h-7 flex-row items-center rounded-[8px] bg-[#4A43EC] px-2.5">
+                        <Ionicons name="cloud-upload-outline" size={12} color="#fff" />
+                        <Text className="ml-1 text-[10px] font-lato-bold text-white">Upload</Text>
+                    </TouchableOpacity>
+                }
+            >
+                {project.documents.map((document) => {
+                    const tone = documentToneStyles[document.tone] ?? documentToneStyles.warning;
+
+                    return (
+                        <View
+                            key={document.label}
+                            className="flex-row items-center justify-between border-b border-[#F1F5F9] py-2 last:border-b-0"
+                        >
+                            <View className="flex-row items-center">
+                                <Ionicons name={document.icon} size={14} color={tone.text} />
+                                <Text className="ml-2 text-[11px] text-[#111827]">{document.label}</Text>
+                            </View>
+                            <Badge label={document.status} styleSet={tone} />
+                        </View>
+                    );
+                })}
+            </Section>
+        </View>
+    );
+}
+
+function FollowUpCard({ item }) {
+    const tone = followUpToneStyles[item.tone] ?? followUpToneStyles.warning;
+
+    return (
+        <View className="mb-2 rounded-[12px] border border-[#EEF0F4] bg-white px-3 py-2.5">
+            <View className="flex-row items-start justify-between">
+                <View className="mr-2 flex-1">
+                    <Text className="text-[12px] font-lato-bold text-[#111827]" numberOfLines={1}>
+                        {item.projectName}
+                    </Text>
+                    <View className="mt-0.5 flex-row items-center">
+                        <Text className="text-[10px] text-[#6B7280]" numberOfLines={1}>
+                            {item.builderName}
+                        </Text>
+                        <View className="mx-1.5 h-0.5 w-0.5 rounded-full bg-[#C8CDD8]" />
+                        <Text className="text-[10px] text-[#6B7280]">{item.time}</Text>
+                    </View>
+                </View>
+                <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: tone.badgeBg }}>
+                    <Text className="text-[9px] font-semibold" style={{ color: tone.badgeText }}>
+                        {item.status}
+                    </Text>
+                </View>
+            </View>
+            <View className="mt-2 rounded-[9px] bg-[#F8F9FF] px-2.5 py-2">
+                <Text className="text-[10px] leading-4 text-[#4B5563]">{item.note}</Text>
+            </View>
+            <View className="mt-2 flex-row items-center">
+                <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => openUrl(`tel:${item.phoneNumber}`)}
+                    className="mr-2 h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#4A43EC]"
+                >
+                    <Ionicons name="call" size={12} color="#fff" />
+                    <Text className="ml-1.5 text-[11px] font-lato-bold text-white">Call</Text>
+                </TouchableOpacity>
+                <TouchableOpacity activeOpacity={0.85} className="h-8 flex-1 items-center justify-center rounded-[9px] bg-[#EBF1FF]">
+                    <Text className="text-[11px] font-lato-bold text-[#4A43EC]">Done</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
+}
+
+function MeetingCard({ item }) {
+    const tone = meetingToneStyles[item.tone] ?? meetingToneStyles.primary;
+
+    return (
+        <View className="mb-2 rounded-[12px] border border-[#EEF0F4] bg-white px-3 py-2.5">
+            <View className="flex-row items-start justify-between">
+                <View className="mr-2 flex-1">
+                    <Text className="text-[12px] font-lato-bold text-[#111827]" numberOfLines={1}>
+                        {item.projectName}
+                    </Text>
+                    <View className="mt-0.5 flex-row items-center">
+                        <Text className="text-[10px] text-[#6B7280]" numberOfLines={1}>
+                            {item.location} - {item.type}
+                        </Text>
+                        <View className="mx-1.5 h-0.5 w-0.5 rounded-full bg-[#C8CDD8]" />
+                        <Text className="text-[10px] text-[#6B7280]">{item.time}</Text>
+                    </View>
+                </View>
+                <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: tone.badgeBg }}>
+                    <Text className="text-[9px] font-semibold" style={{ color: tone.badgeText }}>
+                        {item.status}
+                    </Text>
+                </View>
+            </View>
+            <View className="mt-2 rounded-[9px] bg-[#F8F9FF] px-2.5 py-2">
+                <Text className="text-[10px] leading-4 text-[#4B5563]">
+                    Meet at {item.location} for {item.type.toLowerCase()}.
+                </Text>
+            </View>
+            <View className="mt-2 flex-row items-center">
+                <TouchableOpacity activeOpacity={0.85} className="mr-2 h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#4A43EC]">
+                    <Ionicons name="play-outline" size={12} color="#fff" />
+                    <Text className="ml-1.5 text-[11px] font-lato-bold text-white">Start</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => openUrl(`https://www.google.com/maps/search/?api=1&query=${item.latitude},${item.longitude}`)}
+                    className="h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#EBF1FF]"
+                >
+                    <Ionicons name="location-outline" size={12} color="#4A43EC" />
+                    <Text className="ml-1.5 text-[11px] font-lato-bold text-[#4A43EC]">Navigate</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
+}
+
+function Activity({ project, activeActivityTab, onActivityTabChange }) {
+    const items = activeActivityTab === "followUp" ? project.followUps : project.meetings;
+
+    return (
+        <View className="px-4 pt-3">
+            <View className="mb-3 flex-row items-center justify-between rounded-[12px] bg-[#4A43EC] p-1.5">
+                {[
+                    ["followUp", "Follow Up"],
+                    ["meeting", "Meeting"],
+                ].map(([key, label]) => {
+                    const isActive = activeActivityTab === key;
+
+                    return (
+                        <TouchableOpacity
+                            key={key}
+                            activeOpacity={0.85}
+                            onPress={() => onActivityTabChange(key)}
+                            className={`h-8 flex-1 items-center justify-center rounded-[9px] ${isActive ? "bg-white" : "bg-[#4A43EC]"}`}
+                        >
+                            <Text className={`text-[12px] font-lato-bold ${isActive ? "text-[#4A43EC]" : "text-white"}`}>
+                                {label}
+                            </Text>
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
+
+            {items.map((item) =>
+                activeActivityTab === "followUp" ? <FollowUpCard key={item.id} item={item} /> : <MeetingCard key={item.id} item={item} />,
+            )}
+
+            {!items.length ? (
+                <View className="mt-16 items-center">
+                    <Ionicons name="calendar-outline" size={32} color="#CBD5E1" />
+                    <Text className="mt-3 text-[14px] font-lato-bold text-[#64748B]">No activity yet</Text>
+                </View>
+            ) : null}
+        </View>
+    );
+}
+
+export default function ProjectDetail() {
+    const router = useRouter();
+    const { id } = useLocalSearchParams();
+    const projectId = Array.isArray(id) ? id[0] : id;
+    const dispatch = useDispatch();
+    const [activeTab, setActiveTab] = useState("overview");
+    const [activeActivityTab, setActiveActivityTab] = useState("followUp");
+    const [activeSheet, setActiveSheet] = useState("followUp");
+    const bottomSheetRef = useRef(null);
+    const sheetSnapPoints = useMemo(() => ["86%"], []);
+    const project = useSelector((state) => selectProjectById(state, projectId));
+    const renderBackdrop = useCallback(
+        (props) => <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.35} />,
+        [],
+    );
+
+    const openSheet = useCallback((sheetName) => {
+        setActiveSheet(sheetName);
+        bottomSheetRef.current?.present();
+    }, []);
+
+    const closeSheet = useCallback(() => {
+        bottomSheetRef.current?.dismiss();
+    }, []);
+
+    const saveFollowUp = useCallback(
+        (followUp) => {
+            dispatch(addProjectFollowUp({ projectId, followUp }));
+            closeSheet();
+            setActiveTab("activity");
+            setActiveActivityTab("followUp");
+        },
+        [closeSheet, dispatch, projectId],
+    );
+
+    const saveMeeting = useCallback(
+        (meeting) => {
+            dispatch(addProjectMeeting({ projectId, meeting }));
+            closeSheet();
+            setActiveTab("activity");
+            setActiveActivityTab("meeting");
+        },
+        [closeSheet, dispatch, projectId],
+    );
+
+    if (!project) {
+        return (
+            <View className="flex-1 bg-white">
+                <SafeAreaView className="flex-1 items-center justify-center px-6">
+                    <Text className="text-[18px] font-lato-bold text-[#111827]">Project not found</Text>
+                    <TouchableOpacity onPress={() => router.back()} className="mt-4 h-10 justify-center rounded-[10px] bg-[#4A43EC] px-5">
+                        <Text className="font-lato-bold text-white">Go Back</Text>
+                    </TouchableOpacity>
+                </SafeAreaView>
+            </View>
+        );
+    }
+
+    const typeStyle = typeStyles[project.type] ?? typeStyles.Warm;
+    const statusStyle = statusStyles[project.statusType] ?? statusStyles.followUp;
+
+    return (
+        <>
+            <View className="flex-1 bg-white">
+                <StatusBar style="light" />
+                <SafeAreaView className="flex-1 bg-[#4A43EC]" edges={["top"]}>
+                    <View className="bg-[#4A43EC] px-4 pb-3 pt-1">
+                        <TouchableOpacity
+                            activeOpacity={0.8}
+                            onPress={() => router.back()}
+                            className="mb-3 h-9 w-9 items-start justify-center"
+                        >
+                            <Ionicons name="arrow-back" size={26} color="#fff" />
+                        </TouchableOpacity>
+
+                        <View className="flex-row items-start justify-between">
+                            <View className="mr-4 flex-1">
+                                <Text className="text-[20px] font-lato-bold text-white" numberOfLines={1}>
+                                    {project.projectName}
+                                </Text>
+                                <Text className="mt-0.5 text-[12px] text-white/90">{project.developerName}</Text>
+                                <View className="mt-2 flex-row items-center">
+                                    <Ionicons name="location-outline" size={12} color="#DDE2FF" />
+                                    <Text className="ml-1 text-[11px] text-[#DDE2FF]">
+                                        {project.location}, {project.city}
+                                    </Text>
+                                </View>
+                            </View>
+                            <View className="items-end">
+                                <Badge label={`${project.type} Lead`} styleSet={typeStyle} />
+                                <View className="mt-2">
+                                    <Badge label={project.status} styleSet={statusStyle} />
+                                </View>
+                            </View>
+                        </View>
+
+                        <View className="mt-3 flex-row items-center justify-between">
+                            <Text className="text-[11px] text-white/90">Onboarding Progress</Text>
+                            <Text className="text-[12px] font-lato-bold text-white">{project.onboardingProgress}%</Text>
+                        </View>
+                        <ProgressBar value={project.onboardingProgress} color="#FFFFFF" trackColor="rgba(255,255,255,0.28)" height={7} />
+                    </View>
+
+                    <View className="flex-1 bg-white">
+                        <View className="flex-row border-b border-[#E5E7EB] bg-white px-4 py-2.5">
+                            <TouchableOpacity
+                                activeOpacity={0.85}
+                                onPress={() => openUrl(`tel:${project.phoneNumber}`)}
+                                className="mr-2 h-8 flex-row items-center justify-center rounded-[8px] bg-[#4A43EC] px-3"
+                            >
+                                <Ionicons name="call-outline" size={12} color="#fff" />
+                                <Text className="ml-1.5 text-[10px] font-lato-bold text-white">Call</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                activeOpacity={0.85}
+                                onPress={() => openSheet("followUp")}
+                                className="mr-2 h-8 flex-row items-center justify-center rounded-[8px] border border-[#E2E8F0] px-2.5"
+                            >
+                                <Ionicons name="add" size={12} color="#111827" />
+                                <Text className="ml-1 text-[10px] font-lato-bold text-[#111827]">Follow-up</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                activeOpacity={0.85}
+                                onPress={() => openSheet("meeting")}
+                                className="h-8 flex-row items-center justify-center rounded-[8px] border border-[#E2E8F0] px-2.5"
+                            >
+                                <Ionicons name="calendar-outline" size={12} color="#111827" />
+                                <Text className="ml-1 text-[10px] font-lato-bold text-[#111827]">Meeting</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <View className="flex-row border-b border-[#E5E7EB] bg-white">
+                            {[
+                                ["overview", "Overview"],
+                                ["activity", "Activity"],
+                            ].map(([key, label]) => {
+                                const isActive = activeTab === key;
+
+                                return (
+                                    <TouchableOpacity
+                                        key={key}
+                                        activeOpacity={0.85}
+                                        onPress={() => setActiveTab(key)}
+                                        className={`h-10 flex-1 items-center justify-center border-b-2 ${
+                                            isActive ? "border-[#4A43EC]" : "border-transparent"
+                                        }`}
+                                    >
+                                        <Text className={`text-[12px] ${isActive ? "font-lato-bold text-[#4A43EC]" : "text-[#475569]"}`}>
+                                            {label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+
+                        <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
+                            {activeTab === "overview" ? (
+                                <Overview project={project} />
+                            ) : (
+                                <Activity
+                                    project={project}
+                                    activeActivityTab={activeActivityTab}
+                                    onActivityTabChange={setActiveActivityTab}
+                                />
+                            )}
+                        </ScrollView>
+                    </View>
+                </SafeAreaView>
+            </View>
+            <BottomSheetModal
+                ref={bottomSheetRef}
+                index={0}
+                snapPoints={sheetSnapPoints}
+                backdropComponent={renderBackdrop}
+                enablePanDownToClose
+                backgroundStyle={{ backgroundColor: "#F8FAFC" }}
+                handleIndicatorStyle={{ backgroundColor: "transparent" }}
+            >
+                {activeSheet === "followUp" ? (
+                    <FollowUpForm project={project} onSave={saveFollowUp} />
+                ) : (
+                    <MeetingForm project={project} onSave={saveMeeting} />
+                )}
+            </BottomSheetModal>
+        </>
+    );
+}
