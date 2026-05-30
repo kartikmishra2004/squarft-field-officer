@@ -73,12 +73,16 @@ function openMapLocation(latitude, longitude) {
 export default function Home() {
     const [activeTab, setActiveTab] = useState("meeting");
     const [leadFormOpen, setLeadFormOpen] = useState(false);
+    const [followUpItems, setFollowUpItems] = useState(followUps);
+    const [meetingItems, setMeetingItems] = useState(meetings);
     const { height, width } = useWindowDimensions();
     const leadFormTranslateY = useRef(new Animated.Value(height)).current;
     const notchWidth = Math.min(width * 0.250, 102);
     const notchHeight = 16;
 
     const isFollowUp = activeTab === "followUp";
+    const visibleFollowUps = followUpItems.filter((item) => !item.isDone);
+    const visibleMeetings = meetingItems.filter((item) => !item.isDone);
     const controlsTranslateY = leadFormTranslateY.interpolate({
         inputRange: [0, Math.min(height, 260)],
         outputRange: [-118, 0],
@@ -112,6 +116,14 @@ export default function Home() {
         }).start(() => setLeadFormOpen(false));
     };
 
+    const markFollowUpDone = (id) => {
+        setFollowUpItems((items) => items.map((item) => (item.id === id ? { ...item, isDone: true } : item)));
+    };
+
+    const markMeetingDone = (id) => {
+        setMeetingItems((items) => items.map((item) => (item.id === id ? { ...item, isDone: true } : item)));
+    };
+
     return (
         <View className="flex-1 bg-[#4A43EC]">
             <StatusBar style="dark" />
@@ -141,12 +153,6 @@ export default function Home() {
                         </View>
 
                         <View className="flex-row items-center">
-                            <TouchableOpacity
-                                activeOpacity={0.75}
-                                className="mr-2 h-8 w-8 items-center justify-center rounded-full"
-                            >
-                                <MaterialCommunityIcons name="wallet" size={23} color="#4A43EC" />
-                            </TouchableOpacity>
                             <TouchableOpacity
                                 activeOpacity={0.75}
                                 className="h-8 w-8 items-center justify-center rounded-full"
@@ -261,7 +267,7 @@ export default function Home() {
                     {isFollowUp ? (
                         <View className="px-4">
 
-                            {followUps.map((item) => {
+                            {visibleFollowUps.map((item) => {
                                 const tone = followUpToneStyles[item.tone] ?? followUpToneStyles.warning;
 
                                 return (
@@ -324,6 +330,7 @@ export default function Home() {
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
+                                                onPress={() => markFollowUpDone(item.id)}
                                                 className="h-8 flex-1 items-center justify-center rounded-[9px] bg-[#EBF1FF]"
                                             >
                                                 <Text className="text-[11px] font-lato-bold text-[#4A43EC]">
@@ -338,7 +345,7 @@ export default function Home() {
                     ) : (
                         <View className="px-4">
 
-                            {meetings.map((item) => {
+                            {visibleMeetings.map((item) => {
                                 const tone = meetingToneStyles[item.tone] ?? meetingToneStyles.primary;
 
                                 return (
@@ -391,11 +398,12 @@ export default function Home() {
                                         <View className="mt-2 flex-row items-center">
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
+                                                onPress={() => markMeetingDone(item.id)}
                                                 className="mr-2 h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#4A43EC]"
                                             >
-                                                <Ionicons name="play-outline" size={12} color="#fff" />
+                                                <Ionicons name="checkmark" size={12} color="#fff" />
                                                 <Text className="ml-1.5 text-[11px] font-lato-bold text-white">
-                                                    Start
+                                                    Done
                                                 </Text>
                                             </TouchableOpacity>
                                             <TouchableOpacity

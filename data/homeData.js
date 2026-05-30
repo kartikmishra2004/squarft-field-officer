@@ -8,6 +8,7 @@ export const followUps = [
         note: "Builder asked to call after partner meeting",
         status: "Overdue",
         tone: "danger",
+        isDone: false,
     },
     {
         id: "royal-greens-township",
@@ -18,6 +19,7 @@ export const followUps = [
         note: "Discuss collaboration terms",
         status: "Hot",
         tone: "hot",
+        isDone: false,
     },
     {
         id: "sunrise-heights",
@@ -28,6 +30,7 @@ export const followUps = [
         note: "Collect RERA & layout plan from builder",
         status: "Docs Pending",
         tone: "warning",
+        isDone: false,
     },
 ];
 
@@ -42,6 +45,7 @@ export const meetings = [
         time: "10 AM",
         status: "Today",
         tone: "primary",
+        isDone: false,
     },
     {
         id: "royal-infra",
@@ -53,6 +57,7 @@ export const meetings = [
         time: "1 PM",
         status: "Today",
         tone: "primary",
+        isDone: false,
     },
     {
         id: "sunrise-heights-meeting",
@@ -64,5 +69,6 @@ export const meetings = [
         time: "4 PM",
         status: "Today",
         tone: "success",
+        isDone: false,
     },
 ];
