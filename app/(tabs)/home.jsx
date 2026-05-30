@@ -1,8 +1,10 @@
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import { Animated, Image, Linking, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSelector } from "react-redux";
 import ProjectLeadFormSheet from "../../components/ProjectLeadFormSheet";
 import { followUps, meetings } from "../../data/homeData";
 
@@ -75,6 +77,7 @@ export default function Home() {
     const [leadFormOpen, setLeadFormOpen] = useState(false);
     const [followUpItems, setFollowUpItems] = useState(followUps);
     const [meetingItems, setMeetingItems] = useState(meetings);
+    const notifications = useSelector((state) => state.notifications?.list || []);
     const { height, width } = useWindowDimensions();
     const leadFormTranslateY = useRef(new Animated.Value(height)).current;
     const notchWidth = Math.min(width * 0.250, 102);
@@ -83,6 +86,7 @@ export default function Home() {
     const isFollowUp = activeTab === "followUp";
     const visibleFollowUps = followUpItems.filter((item) => !item.isDone);
     const visibleMeetings = meetingItems.filter((item) => !item.isDone);
+    const unreadNotifications = notifications.filter((item) => !item.watched).length;
     const controlsTranslateY = leadFormTranslateY.interpolate({
         inputRange: [0, Math.min(height, 260)],
         outputRange: [-118, 0],
@@ -155,9 +159,17 @@ export default function Home() {
                         <View className="flex-row items-center">
                             <TouchableOpacity
                                 activeOpacity={0.75}
-                                className="h-8 w-8 items-center justify-center rounded-full"
+                                onPress={() => router.push("/(screens)/notifications")}
+                                className="relative h-8 w-8 items-center justify-center rounded-full"
                             >
                                 <Ionicons name="notifications" size={22} color="#4A43EC" />
+                                {unreadNotifications > 0 && (
+                                    <View className="absolute -right-0.5 -top-0.5 min-w-[16px] h-4 items-center justify-center rounded-full bg-red-500 px-1">
+                                        <Text className="text-[8px] font-lato-bold text-white">
+                                            {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                                        </Text>
+                                    </View>
+                                )}
                             </TouchableOpacity>
                         </View>
                     </View>

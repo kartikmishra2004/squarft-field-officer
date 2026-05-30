@@ -40,6 +40,7 @@ export default function AuthLayout() {
                         <Stack.Screen name="(auth)" options={{ headerShown: false, animation: "none" }} />
                         {/* Main */}
                         <Stack.Screen name="(tabs)" options={{ headerShown: false, animation: "none" }} />
+                        <Stack.Screen name="(screens)" options={{ headerShown: false, animation: "none" }} />
                         <Stack.Screen name="projects/[id]" options={{ headerShown: false }} />
                     </Stack>
                 </BottomSheetModalProvider>
