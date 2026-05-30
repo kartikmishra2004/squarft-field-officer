@@ -3,6 +3,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import { Animated, Image, Linking, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import ProjectLeadFormSheet from "../../components/ProjectLeadFormSheet";
 import { followUps, meetings } from "../../data/homeData";
 
 const profileImage = require("../../assets/images/profile-officer.png");
@@ -71,7 +72,9 @@ function openMapLocation(latitude, longitude) {
 
 export default function Home() {
     const [activeTab, setActiveTab] = useState("meeting");
-    const { width } = useWindowDimensions();
+    const [leadFormOpen, setLeadFormOpen] = useState(false);
+    const { height, width } = useWindowDimensions();
+    const leadFormTranslateY = useRef(new Animated.Value(height)).current;
     const notchWidth = Math.min(width * 0.250, 102);
     const notchHeight = 16;
 
