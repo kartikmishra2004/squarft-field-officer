@@ -1,8 +1,9 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
-import { Image, Linking, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Animated, Image, Linking, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import ProjectLeadFormSheet from "../../components/ProjectLeadFormSheet";
 import { followUps, meetings } from "../../data/homeData";
 
 const profileImage = require("../../assets/images/profile-officer.png");
@@ -71,11 +72,45 @@ function openMapLocation(latitude, longitude) {
 
 export default function Home() {
     const [activeTab, setActiveTab] = useState("meeting");
-    const { width } = useWindowDimensions();
+    const [leadFormOpen, setLeadFormOpen] = useState(false);
+    const { height, width } = useWindowDimensions();
+    const leadFormTranslateY = useRef(new Animated.Value(height)).current;
     const notchWidth = Math.min(width * 0.250, 102);
     const notchHeight = 16;
 
     const isFollowUp = activeTab === "followUp";
+    const controlsTranslateY = leadFormTranslateY.interpolate({
+        inputRange: [0, Math.min(height, 260)],
+        outputRange: [-118, 0],
+        extrapolate: "clamp",
+    });
+
+    useEffect(() => {
+        if (!leadFormOpen) {
+            leadFormTranslateY.setValue(height);
+        }
+    }, [height, leadFormOpen, leadFormTranslateY]);
+
+    const openLeadForm = () => {
+        setLeadFormOpen(true);
+        leadFormTranslateY.setValue(height);
+        requestAnimationFrame(() => {
+            Animated.spring(leadFormTranslateY, {
+                toValue: 0,
+                useNativeDriver: true,
+                damping: 25,
+                stiffness: 185,
+            }).start();
+        });
+    };
+
+    const closeLeadForm = () => {
+        Animated.timing(leadFormTranslateY, {
+            toValue: height,
+            duration: 230,
+            useNativeDriver: true,
+        }).start(() => setLeadFormOpen(false));
+    };
 
     return (
         <View className="flex-1 bg-[#4A43EC]">
@@ -152,7 +187,10 @@ export default function Home() {
                 </View>
             </SafeAreaView>
 
-            <View className="relative h-[82px] overflow-visible bg-[#4A43EC] px-7 pt-[27px]">
+            <Animated.View
+                className="relative h-[82px] overflow-visible bg-[#4A43EC] px-7 pt-[27px]"
+                style={{ transform: [{ translateY: controlsTranslateY }] }}
+            >
                 <View className="z-10 flex-row items-center justify-between">
                     <TouchableOpacity
                         activeOpacity={0.8}
@@ -172,6 +210,7 @@ export default function Home() {
 
                     <TouchableOpacity
                         activeOpacity={0.8}
+                        onPress={openLeadForm}
                         className="h-[44px] w-[44px] items-center justify-center rounded-[8px] bg-white"
                     >
                         <Ionicons name="add" size={27} color="#4A43EC" />
@@ -193,7 +232,7 @@ export default function Home() {
                         </Text>
                     </TouchableOpacity>
                 </View>
-            </View>
+            </Animated.View>
 
             <View
                 className="relative flex-1 overflow-visible rounded-t-[20px] bg-white"
@@ -377,6 +416,13 @@ export default function Home() {
                     )}
                 </ScrollView>
             </View>
+
+            <ProjectLeadFormSheet
+                visible={leadFormOpen}
+                translateY={leadFormTranslateY}
+                screenHeight={height}
+                onClose={closeLeadForm}
+            />
         </View>
     );
 }
