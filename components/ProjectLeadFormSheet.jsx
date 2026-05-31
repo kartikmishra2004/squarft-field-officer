@@ -8,31 +8,66 @@ import {
     useAudioRecorder,
     useAudioRecorderState,
 } from "expo-audio";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     Alert,
     Animated,
+    Dimensions,
     Image,
-    KeyboardAvoidingView,
     PanResponder,
     Platform,
+    Pressable,
     ScrollView,
+    StatusBar,
     Text,
     TextInput,
     TouchableOpacity,
     View,
 } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+const { width } = Dimensions.get("window");
+
 const steps = ["1 Info", "2 Location", "3 Stage", "4 Notes"];
-const projectCategories = ["Residential", "Commercial", "Mixed-use", "Plotting", "Township"];
-const projectTypes = ["Apartment", "Plot", "Villa", "Row House", "Shop", "Office",  "Showroom" ];
-const projectTypesByCategory = {
-    Residential: ["Apartment", "Plot", "Villa", "Row House"],
-    Commercial: ["Shop", "Office", "Showroom"],
-    "Mixed-use": ["Apartment", "Shop", "Office"],
-    Plotting: ["Plot"],
-    Township: ["Apartment", "Plot", "Villa", "Row House"],
+const ANDROID_KEYBOARD_EXTRA_SCROLL = 72;
+const ANDROID_KEYBOARD_EXTRA_HEIGHT = 240;
+const IOS_KEYBOARD_EXTRA_SCROLL = 40;
+const IOS_KEYBOARD_EXTRA_HEIGHT = 66;
+const ANDROID_CONTENT_BOTTOM_PADDING = 180;
+const IOS_CONTENT_BOTTOM_PADDING = 140;
+const mainTypes = [
+    {
+        id: "Residential",
+        label: "Residential",
+        image: require("../assets/icons/property-types/House2.png"),
+        cloudImage: require("../assets/icons/property-types/Clouds.png"),
+    },
+    {
+        id: "Commercial",
+        label: "Commercial",
+        image: require("../assets/icons/property-types/commercial.png"),
+    },
+];
+
+const subTypesData = {
+    Residential: [
+        { id: "Plot", label: "Plot", image: require("../assets/icons/property-types/plot.png") },
+        { id: "Villa", label: "Villa", image: require("../assets/icons/property-types/villa.png") },
+        { id: "Apartment", label: "Apartment", image: require("../assets/icons/property-types/apartment.png") },
+        { id: "Rowhouse", label: "Rowhouse", image: require("../assets/icons/property-types/rowhouse.png") },
+    ],
+    Commercial: [
+        { id: "Shop", label: "Shop", image: require("../assets/icons/property-types/Shop.png") },
+        { id: "Showroom", label: "Showroom", image: require("../assets/icons/property-types/showroom.png") },
+        { id: "Office", label: "Office", image: require("../assets/icons/property-types/office.png") },
+    ],
+};
+
+const subTypeOptions = {
+    Rowhouse: ["1bhk", "2bhk", "3bhk", "4bhk", "5+bhk"],
+    Apartment: ["1bhk", "2bhk", "3bhk", "4bhk", "5+bhk"],
+    Office: ["Ready to move", "Co-working", "Bare shell"],
 };
 const leadStages = [
     "New Lead",
@@ -55,24 +90,6 @@ const followUpTimeOptions = [
     "05:00 PM",
     "06:00 PM",
 ];
-
-const categoryImages = {
-    Residential: require("../assets/images/residential.png"),
-    Commercial: require("../assets/images/commercial.png"),
-    "Mixed-use": require("../assets/images/showroom.png"),
-    Plotting: require("../assets/images/plot.png"),
-    Township: require("../assets/images/rowhouse.png"),
-};
-
-const typeImages = {
-    Apartment: require("../assets/images/apartment.png"),
-    Plot: require("../assets/images/plot.png"),
-    Villa: require("../assets/images/villa.png"),
-    "Row House": require("../assets/images/rowhouse.png"),
-    Shop: require("../assets/images/Shop.png"),
-    Office: require("../assets/images/office.png"),
-    Showroom: require("../assets/images/showroom.png")
-};
 
 function formatDuration(durationMillis = 0) {
     const totalSeconds = Math.max(0, Math.floor(durationMillis / 1000));
@@ -104,15 +121,16 @@ function getFollowUpDateLabel(date, index) {
 function Field({ label, placeholder, value, onChangeText, keyboardType, containerClassName = "" }) {
     return (
         <View className={containerClassName}>
-            <Text className="mb-2 text-[14px] font-lato text-[#5F6068]">{label}</Text>
-            <View className="h-[48px] justify-center rounded-[12px] border border-[#E2E2E5] bg-white px-4">
+            <Text className="mb-1.5 text-xs font-lato-bold text-black">{label}</Text>
+            <View className="h-12 justify-center rounded-xl border border-gray-200 bg-white px-4">
                 <TextInput
                     value={value}
                     onChangeText={onChangeText}
                     placeholder={placeholder}
-                    placeholderTextColor="#B8B8BD"
+                    placeholderTextColor="#9CA3AF"
                     keyboardType={keyboardType}
-                    className="text-[15px] font-lato text-[#111827]"
+                    className="text-[13px] font-lato text-gray-800"
+                    style={{ paddingVertical: 0, textAlignVertical: "center", includeFontPadding: false }}
                 />
             </View>
         </View>
@@ -124,8 +142,8 @@ function Chip({ label, active, onPress }) {
         <TouchableOpacity
             activeOpacity={0.82}
             onPress={onPress}
-            className={`mb-2 mr-2 h-[31px] items-center justify-center rounded-full px-3.5 ${
-                active ? "bg-[#4A43EC]" : "border border-[#E0E1E6] bg-white"
+            className={`mb-2 mr-2 h-9 items-center justify-center rounded-full px-4 ${
+                active ? "bg-[#4A43EC]" : "border border-gray-200 bg-white"
             }`}
             style={
                 active
@@ -139,32 +157,38 @@ function Chip({ label, active, onPress }) {
                     : null
             }
         >
-            <Text className={`text-[13px] font-lato-bold ${active ? "text-white" : "text-[#686A73]"}`}>
+            <Text className={`text-xs font-lato-bold ${active ? "text-white" : "text-gray-600"}`}>
                 {label}
             </Text>
         </TouchableOpacity>
     );
 }
 
-function CategoryImageCard({ label, active, onPress, image }) {
+function CategoryImageCard({ item, active, onPress }) {
     return (
         <TouchableOpacity
             activeOpacity={0.82}
             onPress={onPress}
-            className="mb-3 overflow-hidden rounded-[9px] border bg-white"
+            className="relative mb-3 overflow-hidden rounded-xl border bg-white"
             style={{
-                borderColor: active ? "#4A43EC" : "#FFFFFF",
-                width: "48%",
-                height: 102,
+                borderColor: active ? "#4A43EC" : "#F3F4F6",
+                backgroundColor: active ? "#F4F7FF" : "#FFFFFF",
+                width: (width - 50) / 2,
+                height: 96,
+                shadowColor: "#111827",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.06,
+                shadowRadius: 4,
+                elevation: 1,
             }}
         >
-            <View className="flex-1 px-2.5 py-2">
-                <Text className="text-[13px] font-lato text-[#111111]" numberOfLines={1}>
-                    {label}
-                </Text>
+            <Text className="absolute left-2.5 top-2 z-10 text-[10px] font-lato-bold text-black" numberOfLines={1}>
+                {item.label}
+            </Text>
+            <View className="flex-1 items-end justify-end">
                 <Image
-                    source={image}
-                    className="absolute bottom-0 right-1 h-[78px] w-[115px]"
+                    source={item.image}
+                    className="h-[70%] w-[80%]"
                     resizeMode="contain"
                 />
             </View>
@@ -172,25 +196,79 @@ function CategoryImageCard({ label, active, onPress, image }) {
     );
 }
 
-function TypeImageCard({ label, active, onPress, image }) {
+function TypeImageCard({ item, active, onPress }) {
     return (
         <TouchableOpacity
             activeOpacity={0.82}
             onPress={onPress}
-            className="mb-3 overflow-hidden rounded-[9px] border bg-white"
+            className="mb-3 mr-3 items-center overflow-hidden rounded-lg border bg-white"
             style={{
-                borderColor: active ? "#4A43EC" : "#FFFFFF",
-                width: "23%",
-                height: 91,
+                borderColor: active ? "#4A43EC" : "#F3F4F6",
+                backgroundColor: active ? "#F4F7FF" : "#FFFFFF",
+                width: width * 0.22,
+                height: 80,
+                shadowColor: "#111827",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.06,
+                shadowRadius: 4,
+                elevation: 1,
             }}
         >
-            <View className="flex-1 items-center px-1.5 pb-1 pt-2">
-                <Text className="text-center text-[11px] font-lato text-[#111111]" numberOfLines={1}>
-                    {label}
-                </Text>
-                <Image source={image} className="mt-1 h-[62px] w-[68px]" resizeMode="contain" />
+            <Text
+                className={`mb-0.5 mt-1.5 text-[9px] font-lato-bold ${
+                    active ? "text-[#4A43EC]" : "text-black"
+                }`}
+                numberOfLines={1}
+            >
+                {item.label}
+            </Text>
+            <View className="w-full flex-1 justify-end">
+                <Image source={item.image} className="h-[60%] w-full" resizeMode="contain" />
             </View>
         </TouchableOpacity>
+    );
+}
+
+function SubTypeDropdown({ propertyType, subType, open, onToggle, onSelect }) {
+    if (!propertyType || !subTypeOptions[propertyType]) return null;
+
+    return (
+        <View>
+            <Text className="mb-1.5 text-xs font-lato-bold text-black">Configuration / Status</Text>
+            <Pressable
+                onPress={onToggle}
+                className="h-12 flex-row items-center rounded-xl border border-gray-200 px-4"
+            >
+                <Text className={`flex-1 text-[13px] ${subType ? "text-gray-900" : "text-gray-400"}`}>
+                    {subType || "Select option"}
+                </Text>
+                <Ionicons name={open ? "chevron-up" : "chevron-down"} size={20} color="#6B7280" />
+            </Pressable>
+            {open && (
+                <View
+                    className="mb-1 mt-1 overflow-hidden rounded-xl border border-gray-200 bg-white"
+                    style={{
+                        elevation: 3,
+                        shadowColor: "#000",
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.1,
+                        shadowRadius: 4,
+                    }}
+                >
+                    {subTypeOptions[propertyType].map((option, index) => (
+                        <Pressable
+                            key={option}
+                            onPress={() => onSelect(option)}
+                            className={`px-4 py-3 ${
+                                index < subTypeOptions[propertyType].length - 1 ? "border-b border-gray-100" : ""
+                            }`}
+                        >
+                            <Text className="text-[13px] text-gray-800">{option}</Text>
+                        </Pressable>
+                    ))}
+                </View>
+            )}
+        </View>
     );
 }
 
@@ -199,8 +277,8 @@ function RadioOption({ label, selected, onPress }) {
         <TouchableOpacity
             activeOpacity={0.7}
             onPress={onPress}
-            className={`mb-3 h-[52px] flex-row items-center rounded-[12px] border px-4 ${
-                selected ? "border-[#4A43EC] bg-[#F5F4FF]" : "border-[#E2E2E5] bg-white"
+            className={`mb-3 h-12 flex-row items-center rounded-xl border px-4 ${
+                selected ? "border-[#4A43EC] bg-[#F4F7FF]" : "border-gray-200 bg-white"
             }`}
         >
             <View
@@ -210,7 +288,7 @@ function RadioOption({ label, selected, onPress }) {
             >
                 {selected && <View className="h-2.5 w-2.5 rounded-full bg-[#4A43EC]" />}
             </View>
-            <Text className={`ml-3 text-[15px] font-lato ${selected ? "text-[#4A43EC]" : "text-[#374151]"}`}>
+            <Text className={`ml-3 text-[13px] font-lato-bold ${selected ? "text-[#4A43EC]" : "text-gray-800"}`}>
                 {label}
             </Text>
         </TouchableOpacity>
@@ -229,14 +307,14 @@ function PriorityChip({ label, active, onPress }) {
         <TouchableOpacity
             activeOpacity={0.82}
             onPress={onPress}
-            className={`h-[36px] flex-1 items-center justify-center rounded-[12px] border-2`}
+            className="h-10 flex-1 items-center justify-center rounded-xl border"
             style={{
                 borderColor: active ? style.border : "#E5E7EB",
                 backgroundColor: active ? style.bg : "#FFFFFF",
             }}
         >
             <Text
-                className="text-[15px] font-lato-bold"
+                className="text-[13px] font-lato-bold"
                 style={{ color: active ? style.text : "#9CA3AF" }}
             >
                 {label}
@@ -247,6 +325,7 @@ function PriorityChip({ label, active, onPress }) {
 
 export default function ProjectLeadFormSheet({ visible, translateY, screenHeight, onClose }) {
     const [currentStep, setCurrentStep] = useState(0);
+    const scrollRef = useRef(null);
     const [form, setForm] = useState({
         projectName: "",
         builderName: "",
@@ -261,7 +340,9 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
         followUpDate: "",
     });
     const [category, setCategory] = useState("Residential");
-    const [projectType, setProjectType] = useState("Apartment");
+    const [projectType, setProjectType] = useState("");
+    const [subType, setSubType] = useState("");
+    const [showSubTypeDropdown, setShowSubTypeDropdown] = useState(false);
     const [leadStage, setLeadStage] = useState("New Lead");
     const [interactionType, setInteractionType] = useState("Call");
     const [priority, setPriority] = useState("Hot");
@@ -270,7 +351,7 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
     const [followUpPickerOpen, setFollowUpPickerOpen] = useState(false);
     const [followUpPickerStep, setFollowUpPickerStep] = useState("date");
     const [selectedFollowUpDate, setSelectedFollowUpDate] = useState(null);
-    const visibleProjectTypes = projectTypesByCategory[category] ?? projectTypes;
+    const visibleProjectTypes = subTypesData[category] ?? [];
     const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
     const recorderState = useAudioRecorderState(audioRecorder, 250);
     const voicePlayer = useAudioPlayer(voiceNoteUri ? { uri: voiceNoteUri } : null, {
@@ -299,12 +380,21 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
     };
 
     const selectCategory = (nextCategory) => {
-        const nextTypes = projectTypesByCategory[nextCategory] ?? projectTypes;
-
         setCategory(nextCategory);
-        if (!nextTypes.includes(projectType)) {
-            setProjectType(nextTypes[0]);
-        }
+        setProjectType("");
+        setSubType("");
+        setShowSubTypeDropdown(false);
+    };
+
+    const selectProjectType = (nextProjectType) => {
+        setProjectType(nextProjectType);
+        setSubType("");
+        setShowSubTypeDropdown(false);
+    };
+
+    const selectSubType = (nextSubType) => {
+        setSubType(nextSubType);
+        setShowSubTypeDropdown(false);
     };
 
     const selectFollowUpDate = (dateOption) => {
@@ -355,6 +445,7 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
             form,
             category,
             projectType,
+            subType,
             leadStage,
             interactionType,
             priority,
@@ -446,6 +537,11 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
         }
     }, [voicePlayer, voicePlayerStatus.didJustFinish]);
 
+    useEffect(() => {
+        scrollRef.current?.scrollToPosition?.(0, 0, false);
+        scrollRef.current?.scrollTo?.({ y: 0, animated: false });
+    }, [currentStep]);
+
     const panResponder = useMemo(
         () =>
             PanResponder.create({
@@ -474,54 +570,60 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
 
     return (
         <Animated.View
-            className="absolute inset-0 z-50 bg-[#F3F4F8]"
+            className="absolute inset-0 z-50 bg-[#F8F9FE]"
             style={{
                 transform: [{ translateY }],
                 minHeight: screenHeight,
             }}
         >
-            <KeyboardAvoidingView
-                className="flex-1"
-                behavior={Platform.OS === "ios" ? "padding" : undefined}
-            >
-                <SafeAreaView className="bg-white" edges={["top"]}>
-                    <View className="bg-white px-6 pb-4 pt-3" {...panResponder.panHandlers}>
-                        <View className="flex-row items-center">
+            <StatusBar barStyle="light-content" />
+            <View className="flex-1">
+                <SafeAreaView className="bg-[#4A43EC]" edges={["top"]}>
+                    <View className="bg-[#4A43EC] px-5 pb-8" {...panResponder.panHandlers}>
+                        <View className="mt-2 mb-8 flex-row items-center justify-between">
                             <TouchableOpacity
                                 activeOpacity={0.78}
                                 onPress={handleClose}
-                                className="h-11 w-11 items-center justify-center rounded-[11px] bg-[#F5F5F8]"
+                                className="p-1"
                             >
-                                <Ionicons name="arrow-back" size={24} color="#111111" />
+                                <Ionicons name="arrow-back" size={20} color="white" />
                             </TouchableOpacity>
-                            <Text className="ml-4 text-[22px] font-lato-bold text-[#111111]">
+                            <Text className="flex-1 text-center text-base font-lato-bold text-white">
                                 Add New Project Lead
                             </Text>
+                            <View style={{ width: 20 }} />
                         </View>
 
-                        <View
-                            className="mt-5 h-[50px] flex-row rounded-[15px] border border-[#E2E3EB] bg-[#F0F1F6] p-1"
-                            style={{ overflow: "hidden" }}
-                        >
+                        <View className="mt-2 flex-row items-start justify-between">
                             {steps.map((step, index) => {
                                 const active = index === currentStep;
 
                                 return (
                                     <View
                                         key={step}
-                                        className="flex-1 items-center justify-center"
-                                        style={{
-                                            backgroundColor: active ? "#4A43EC" : "transparent",
-                                            borderRadius: 10,
-                                            overflow: "hidden",
-                                        }}
+                                        className="items-center"
+                                        style={{ width: (width - 40) / steps.length }}
                                     >
-                                        <Text
-                                            className={`text-[15px] font-lato ${
-                                                active ? "text-white" : "text-[#8E9098]"
+                                        <View
+                                            className={`mb-1.5 h-7 w-7 items-center justify-center rounded-full ${
+                                                active ? "bg-white" : "border border-white/40 bg-transparent"
                                             }`}
                                         >
-                                            {step}
+                                            <Text
+                                                className={`text-xs font-lato-bold ${
+                                                    active ? "text-[#4A43EC]" : "text-white/60"
+                                                }`}
+                                            >
+                                                {index + 1}
+                                            </Text>
+                                        </View>
+                                        <Text
+                                            className={`text-center text-[8px] font-lato ${
+                                                active ? "text-white" : "text-white/60"
+                                            }`}
+                                            numberOfLines={1}
+                                        >
+                                            {step.replace(/^\d\s*/, "")}
                                         </Text>
                                     </View>
                                 );
@@ -530,16 +632,39 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                     </View>
                 </SafeAreaView>
 
-                <ScrollView
-                    className="flex-1"
-                    contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 18, paddingBottom: 98 }}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator={false}
-                >
+                <View className="-mt-5 flex-1 overflow-hidden rounded-t-[20px] bg-white">
+                    <KeyboardAwareScrollView
+                        innerRef={(ref) => {
+                            scrollRef.current = ref;
+                        }}
+                        className="flex-1 px-5 pt-6"
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={{
+                            paddingBottom:
+                                Platform.OS === "android"
+                                    ? ANDROID_CONTENT_BOTTOM_PADDING
+                                    : IOS_CONTENT_BOTTOM_PADDING,
+                            flexGrow: 1,
+                        }}
+                        keyboardShouldPersistTaps="always"
+                        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+                        enableOnAndroid
+                        extraScrollHeight={
+                            Platform.OS === "android" ? ANDROID_KEYBOARD_EXTRA_SCROLL : IOS_KEYBOARD_EXTRA_SCROLL
+                        }
+                        extraHeight={
+                            Platform.OS === "android" ? ANDROID_KEYBOARD_EXTRA_HEIGHT : IOS_KEYBOARD_EXTRA_HEIGHT
+                        }
+                        viewIsInsideTabBar={Platform.OS === "android"}
+                        enableAutomaticScroll
+                        keyboardOpeningTime={Platform.OS === "android" ? 0 : 250}
+                        enableResetScrollToCoords={false}
+                        nestedScrollEnabled={Platform.OS === "android"}
+                    >
                     {/* Step 1: Basic Project Info */}
                     {currentStep === 0 && (
-                        <View className="rounded-[16px] border border-[#E6E7EF] bg-white px-4 py-5">
-                            <Text className="mb-5 text-[17px] font-lato text-[#4A43EC]">
+                        <View className="gap-6">
+                            <Text className="text-base font-lato-bold text-black">
                                 Step 1: Basic Project Info
                             </Text>
 
@@ -586,38 +711,48 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 />
                             </View>
 
-                            <Text className="mb-2.5 text-[14px] font-lato text-[#111111]">Project Category</Text>
-                            <View className="mb-3 flex-row flex-wrap justify-between">
-                                {projectCategories.map((item) => (
+                            <Text className="text-xs font-lato-bold text-black">Property Category</Text>
+                            <View className="flex-row justify-between">
+                                {mainTypes.map((item) => (
                                     <CategoryImageCard
-                                        key={item}
-                                        label={item}
-                                        active={category === item}
-                                        onPress={() => selectCategory(item)}
-                                        image={categoryImages[item]}
+                                        key={item.id}
+                                        item={item}
+                                        active={category === item.id}
+                                        onPress={() => selectCategory(item.id)}
                                     />
                                 ))}
                             </View>
 
-                            <Text className="mb-2.5 text-[14px] font-lato text-[#111111]">Property Type</Text>
-                            <View className="mb-5 flex-row flex-wrap gap-8">
+                            <Text className="text-sm font-lato-bold text-black">Property Type</Text>
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                className="flex-row"
+                            >
                                 {visibleProjectTypes.map((item) => (
                                     <TypeImageCard
-                                        key={item}
-                                        label={item}
-                                        active={projectType === item}
-                                        onPress={() => setProjectType(item)}
-                                        image={typeImages[item]}
+                                        key={item.id}
+                                        item={item}
+                                        active={projectType === item.id}
+                                        onPress={() => selectProjectType(item.id)}
                                     />
                                 ))}
-                            </View>
+                            </ScrollView>
+
+                            <SubTypeDropdown
+                                propertyType={projectType}
+                                subType={subType}
+                                open={showSubTypeDropdown}
+                                onToggle={() => setShowSubTypeDropdown((open) => !open)}
+                                onSelect={selectSubType}
+                            />
 
                             <TouchableOpacity
                                 activeOpacity={0.86}
                                 onPress={nextStep}
-                                className="h-[45px] flex-row items-center justify-center rounded-[14px] bg-[#4A43EC]"
+                                className="items-center rounded-xl bg-[#4A43EC] py-4"
                             >
-                                <Text className="text-[17px] font-lato-bold text-white">
+                                <Text className="text-sm font-lato-bold text-white">
                                     Next: Location Info {"\u2192"}
                                 </Text>
                             </TouchableOpacity>
@@ -626,8 +761,8 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
 
                     {/* Step 2: Location Info */}
                     {currentStep === 1 && (
-                        <View className="rounded-[16px] border border-[#E6E7EF] bg-white px-4 py-5">
-                            <Text className="mb-5 text-[17px] font-lato text-[#4A43EC]">
+                        <View className="gap-6">
+                            <Text className="text-base font-lato-bold text-black">
                                 Step 2: Location Info
                             </Text>
 
@@ -666,15 +801,15 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
 
                             <TouchableOpacity
                                 activeOpacity={0.8}
-                                className="mb-4 h-[52px] flex-row items-center justify-center rounded-[12px] border-2 border-dashed border-[#4A43EC] bg-[#f4f4f7]"
+                                className="h-12 flex-row items-center justify-center rounded-2xl border border-dashed border-[#4A43EC]/30 bg-[#F4F7FF]"
                             >
                                 <Ionicons name="location-outline" size={20} color="#4A43EC" />
-                                <Text className="ml-2 text-[15px] font-lato-bold text-[#4A43EC]">
+                                <Text className="ml-2 text-xs font-lato-bold text-[#4A43EC]">
                                     Pick Location on Map
                                 </Text>
                             </TouchableOpacity>
 
-                            <View className="mb-5 h-[130px] items-center justify-center rounded-[12px] bg-[#F5F5F8]">
+                            <View className="h-[130px] items-center justify-center rounded-2xl bg-[#F4F7FF]">
                                 <Ionicons name="map-outline" size={48} color="#D1D5DB" />
                                 <Text className="mt-2 text-[13px] text-[#9CA3AF]">
                                     Map preview will appear here
@@ -685,18 +820,18 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 <TouchableOpacity
                                     activeOpacity={0.86}
                                     onPress={prevStep}
-                                    className="h-[40px] flex-1 items-center justify-center rounded-[14px] bg-[#F3F4F6]"
+                                    className="flex-1 items-center justify-center rounded-xl bg-gray-100 py-4"
                                 >
-                                    <Text className="text-[17px] font-lato-bold text-[#374151]">
+                                    <Text className="text-sm font-lato-bold text-gray-700">
                                         {"\u2190"} Back
                                     </Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     activeOpacity={0.86}
                                     onPress={nextStep}
-                                    className="h-[40px] flex-[2] items-center justify-center rounded-[14px] bg-[#4A43EC]"
+                                    className="flex-[2] items-center justify-center rounded-xl bg-[#4A43EC] py-4"
                                 >
-                                    <Text className="text-[17px] font-lato-bold text-white">
+                                    <Text className="text-sm font-lato-bold text-white">
                                         Next: Stage {"\u2192"}
                                     </Text>
                                 </TouchableOpacity>
@@ -706,11 +841,11 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
 
                     {/* Step 3: Current Lead Stage */}
                     {currentStep === 2 && (
-                        <View className="rounded-[16px] border border-[#E6E7EF] bg-white px-4 py-5">
-                            <Text className="mb-2 text-[17px] font-lato text-[#4A43EC]">
+                        <View className="gap-5">
+                            <Text className="text-base font-lato-bold text-black">
                                 Step 3: Current Lead Stage
                             </Text>
-                            <Text className="mb-5 text-[13px] text-[#9CA3AF]">
+                            <Text className="text-[11px] text-gray-400">
                                 What is the current stage of this project?
                             </Text>
 
@@ -727,18 +862,18 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 <TouchableOpacity
                                     activeOpacity={0.86}
                                     onPress={prevStep}
-                                    className="h-[40px] flex-1 items-center justify-center rounded-[14px] bg-[#F3F4F6]"
+                                    className="flex-1 items-center justify-center rounded-xl bg-gray-100 py-4"
                                 >
-                                    <Text className="text-[17px] font-lato-bold text-[#374151]">
+                                    <Text className="text-sm font-lato-bold text-gray-700">
                                         {"\u2190"} Back
                                     </Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     activeOpacity={0.86}
                                     onPress={nextStep}
-                                    className="h-[40px] flex-[2] items-center justify-center rounded-[14px] bg-[#4A43EC]"
+                                    className="flex-[2] items-center justify-center rounded-xl bg-[#4A43EC] py-4"
                                 >
-                                    <Text className="text-[17px] font-lato-bold text-white">
+                                    <Text className="text-sm font-lato-bold text-white">
                                         Next: Notes {"\u2192"}
                                     </Text>
                                 </TouchableOpacity>
@@ -748,13 +883,13 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
 
                     {/* Step 4: First Interaction Notes */}
                     {currentStep === 3 && (
-                        <View className="rounded-[16px] border border-[#E6E7EF] bg-white px-4 py-5">
-                            <Text className="mb-5 text-[17px] font-lato text-[#4A43EC]">
+                        <View className="gap-5">
+                            <Text className="text-base font-lato-bold text-black">
                                 Step 4: First Interaction Notes
                             </Text>
 
-                            <Text className="mb-2.5 text-[14px] font-lato text-[#5F6068]">Interaction Type</Text>
-                            <View className="mb-4 flex-row flex-wrap">
+                            <Text className="text-xs font-lato-bold text-black">Interaction Type</Text>
+                            <View className="flex-row flex-wrap">
                                 {interactionTypes.map((item) => (
                                     <Chip
                                         key={item}
@@ -765,33 +900,33 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 ))}
                             </View>
 
-                            <View className="mb-4">
-                                <Text className="mb-2 text-[14px] font-lato text-[#5F6068]">
+                            <View>
+                                <Text className="mb-1.5 text-xs font-lato-bold text-black">
                                     What did the builder say?
                                 </Text>
-                                <View className="min-h-[100px] rounded-[12px] border border-[#E2E2E5] bg-white px-4 py-3">
+                                <View className="min-h-[100px] rounded-xl border border-gray-200 bg-white px-4 py-3">
                                     <TextInput
                                         value={form.builderNotes}
                                         onChangeText={setField("builderNotes")}
                                         placeholder="e.g. Builder said partner is out of station. Need to call again on Monday."
-                                        placeholderTextColor="#B8B8BD"
+                                        placeholderTextColor="#9CA3AF"
                                         multiline
                                         textAlignVertical="top"
-                                        className="text-[15px] font-lato text-[#111827]"
+                                        className="text-[13px] font-lato text-gray-800"
                                     />
                                 </View>
                             </View>
 
-                            <View className="mb-4">
-                                <Text className="mb-2 text-[14px] font-lato text-[#5F6068]">
+                            <View>
+                                <Text className="mb-1.5 text-xs font-lato-bold text-black">
                                     Next Follow-up Date & Time
                                 </Text>
                                 <TouchableOpacity
                                     activeOpacity={0.8}
                                     onPress={toggleFollowUpPicker}
-                                    className="h-[48px] flex-row items-center justify-between rounded-[12px] border border-[#E2E2E5] bg-white px-4"
+                                    className="h-12 flex-row items-center justify-between rounded-xl border border-gray-200 bg-white px-4"
                                 >
-                                    <Text className="text-[15px] font-lato text-[#B8B8BD]">
+                                    <Text className={`text-[13px] font-lato ${form.followUpDate ? "text-gray-800" : "text-gray-400"}`}>
                                         {form.followUpDate || "Select date & time"}
                                     </Text>
                                     <Ionicons
@@ -802,7 +937,7 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 </TouchableOpacity>
 
                                 {followUpPickerOpen && (
-                                    <View className="mt-2 rounded-[12px] border border-[#E5E7EB] bg-[#F9FAFB] p-3">
+                                    <View className="mt-2 rounded-xl border border-gray-200 bg-[#F8F9FE] p-3">
                                         <View className="mb-3 flex-row items-center justify-between">
                                             <Text className="text-[13px] font-lato-bold text-[#374151]">
                                                 {followUpPickerStep === "date" ? "Select date" : "Select time"}
@@ -872,8 +1007,8 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 )}
                             </View>
 
-                            <Text className="mb-2.5 text-[14px] font-lato text-[#5F6068]">Priority</Text>
-                            <View className="mb-4 flex-row" style={{ columnGap: 10 }}>
+                            <Text className="text-xs font-lato-bold text-black">Priority</Text>
+                            <View className="flex-row" style={{ columnGap: 10 }}>
                                 {priorities.map((item) => (
                                     <PriorityChip
                                         key={item}
@@ -884,11 +1019,11 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 ))}
                             </View>
 
-                            <View className="mb-5 rounded-[12px] border border-[#E5E7EB] bg-[#F9FAFB] p-2.5">
+                            <View className="rounded-xl border border-gray-200 bg-[#F8F9FE] p-2.5">
                                 <TouchableOpacity
                                     activeOpacity={0.8}
                                     onPress={toggleVoiceRecording}
-                                    className={`h-[46px] flex-row items-center justify-center rounded-[10px] ${
+                                    className={`h-[46px] flex-row items-center justify-center rounded-xl ${
                                         isRecordingVoiceNote ? "bg-[#FEE2E2]" : "bg-white"
                                     }`}
                                 >
@@ -898,7 +1033,7 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                         color={isRecordingVoiceNote ? "#EF4444" : "#4A43EC"}
                                     />
                                     <Text
-                                        className={`ml-2 text-[15px] font-lato-bold ${
+                                        className={`ml-2 text-[13px] font-lato-bold ${
                                             isRecordingVoiceNote ? "text-[#EF4444]" : "text-[#374151]"
                                         }`}
                                     >
@@ -961,27 +1096,28 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 <TouchableOpacity
                                     activeOpacity={0.86}
                                     onPress={prevStep}
-                                    className="h-[40px] flex-1 items-center justify-center rounded-[14px] bg-[#F3F4F6]"
+                                    className="flex-1 items-center justify-center rounded-xl bg-gray-100 py-4"
                                 >
-                                    <Text className="text-[17px] font-lato-bold text-[#374151]">
+                                    <Text className="text-sm font-lato-bold text-gray-700">
                                         {"\u2190"} Back
                                     </Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     activeOpacity={0.86}
                                     onPress={handleSave}
-                                    className="h-[40px] flex-[2] flex-row items-center justify-center rounded-[14px] bg-[#10B981]"
+                                    className="flex-[2] flex-row items-center justify-center rounded-xl bg-[#4A43EC] py-4"
                                 >
-                                    <Ionicons name="checkmark" size={22} color="#FFFFFF" />
-                                    <Text className="ml-1 text-[17px] font-lato-bold text-white">
+                                    <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+                                    <Text className="ml-1 text-sm font-lato-bold text-white">
                                         Save Lead
                                     </Text>
                                 </TouchableOpacity>
                             </View>
                         </View>
                     )}
-                </ScrollView>
-            </KeyboardAvoidingView>
+                    </KeyboardAwareScrollView>
+                </View>
+            </View>
         </Animated.View>
     );
 }
