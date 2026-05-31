@@ -18,6 +18,7 @@ const projectsSlice = createSlice({
                 project.followUps.unshift(followUp);
                 project.status = "Follow up";
                 project.statusType = "followUp";
+                project.journeyStage = "Follow-up";
                 project.nextAction = followUp.note;
                 project.lastContact = "Today";
             }
@@ -30,6 +31,7 @@ const projectsSlice = createSlice({
                 project.meetings.unshift(meeting);
                 project.status = "Meeting Set";
                 project.statusType = "meeting";
+                project.journeyStage = "Meeting Scheduled";
                 project.nextAction = `Meet at ${meeting.location} for ${meeting.type.toLowerCase()}`;
                 project.lastContact = "Today";
             }

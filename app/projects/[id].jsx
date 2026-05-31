@@ -8,6 +8,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { Linking, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
+import { projectJourneyTemplate } from "../../data/projectsData";
 import { addProjectFollowUp, addProjectMeeting, selectProjectById } from "../../store/slices/projectsSlice";
 
 const typeStyles = {
@@ -65,6 +66,18 @@ const meetingTypes = ["Site Meeting", "Builder Office", "SquarFT Office", "Phone
 const meetingStatuses = ["Scheduled", "Today", "Tomorrow", "Planned", "Done"];
 const meetingAgenda = ["Company Introduction", "Project Collaboration Discussion", "Pricing Discussion", "Inventory Collection", "Document Collection"];
 const reminderOptions = ["30 minutes before", "1 hour before", "2 hours before", "1 day before"];
+const defaultProjectJourneyStage = "Meeting Scheduled";
+
+function getProjectJourney(stage = defaultProjectJourneyStage) {
+    const stageIndex = projectJourneyTemplate.findIndex((item) => item.label === stage);
+    const fallbackIndex = projectJourneyTemplate.findIndex((item) => item.label === defaultProjectJourneyStage);
+    const currentIndex = stageIndex >= 0 ? stageIndex : Math.max(0, fallbackIndex);
+
+    return projectJourneyTemplate.map((item, index) => ({
+        ...item,
+        state: index < currentIndex ? "done" : index === currentIndex ? "current" : "upcoming",
+    }));
+}
 
 async function openUrl(url) {
     const supported = await Linking.canOpenURL(url);
@@ -681,7 +694,7 @@ function Overview({ project }) {
 
     return (
         <View className="px-4 pt-3">
-            <ProjectJourney items={project.journey} />
+            <ProjectJourney items={getProjectJourney(project.journeyStage)} />
 
             <View className="mb-3 flex-row">
                 <View className="mr-2.5 w-[34%] rounded-[12px] border border-[#E5E7EB] bg-white p-3">

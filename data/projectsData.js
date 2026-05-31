@@ -4,6 +4,14 @@ export const projectFilters = [
     { key: "meeting", label: "Meeting" },
 ];
 
+export const projectJourneyTemplate = [
+    { label: "New Lead Added", note: "18 May . 10:00 AM" },
+    { label: "First Contact", note: "19 May . Called. Builder interested." },
+    { label: "Follow-up", note: "21 May . Builder reviewing." },
+    { label: "Meeting Scheduled", note: "Site visit tomorrow at 12 PM" },
+    { label: "Interested", note: "Waiting for confirmation" },
+];
+
 export const projects = [
     {
         id: "skyline-residency",
@@ -42,13 +50,7 @@ export const projects = [
             { label: "Layout Plan", status: "Pending", icon: "map-outline", tone: "warning" },
             { label: "Builder KYC", status: "Not Uploaded", icon: "id-card-outline", tone: "danger" },
         ],
-        journey: [
-            { label: "New Lead Added", note: "18 May . 10:00 AM", state: "done" },
-            { label: "First Contact", note: "19 May . Called. Builder interested.", state: "done" },
-            { label: "Follow-up + WA Profile Sent", note: "21 May . Builder reviewing.", state: "done" },
-            { label: "Meeting Scheduled", note: "Site visit tomorrow at 12 PM", state: "current" },
-            { label: "Interested -> Onboarding", note: "Waiting for confirmation", state: "upcoming" },
-        ],
+        journeyStage: "Meeting Scheduled",
         followUps: [
             {
                 id: "skyline-follow-1",
@@ -129,12 +131,7 @@ export const projects = [
             { label: "Project Brochure", status: "Uploaded", icon: "document-text-outline", tone: "success" },
             { label: "Layout Plan", status: "Pending", icon: "map-outline", tone: "warning" },
         ],
-        journey: [
-            { label: "New Lead Added", note: "16 May . 11:30 AM", state: "done" },
-            { label: "First Contact", note: "17 May . Intro call completed.", state: "done" },
-            { label: "Follow-up Pending", note: "Waiting for partner meeting.", state: "current" },
-            { label: "Meeting Scheduled", note: "Not scheduled yet", state: "upcoming" },
-        ],
+        journeyStage: "Follow-up",
         followUps: [
             {
                 id: "royal-follow-1",
@@ -205,12 +202,7 @@ export const projects = [
             { label: "RERA Certificate", status: "Pending", icon: "ribbon-outline", tone: "warning" },
             { label: "Builder KYC", status: "Uploaded", icon: "id-card-outline", tone: "success" },
         ],
-        journey: [
-            { label: "New Lead Added", note: "14 May . 9:45 AM", state: "done" },
-            { label: "KYC Received", note: "16 May . Builder sent documents.", state: "done" },
-            { label: "RERA Follow-up", note: "Collect certificate today.", state: "current" },
-            { label: "Admin Review", note: "After RERA upload", state: "upcoming" },
-        ],
+        journeyStage: "Follow-up",
         followUps: [
             {
                 id: "green-follow-1",
@@ -270,12 +262,7 @@ export const projects = [
             { label: "Project Brochure", status: "Uploaded", icon: "document-text-outline", tone: "success" },
             { label: "Inventory Sheet", status: "Pending", icon: "list-outline", tone: "warning" },
         ],
-        journey: [
-            { label: "New Lead Added", note: "12 May . 3:00 PM", state: "done" },
-            { label: "Builder Confirmed", note: "18 May . Site walk-through agreed.", state: "done" },
-            { label: "Meeting Scheduled", note: "Today at 4 PM", state: "current" },
-            { label: "Onboarding Review", note: "After visit", state: "upcoming" },
-        ],
+        journeyStage: "Meeting Scheduled",
         followUps: [
             {
                 id: "sunrise-follow-1",
@@ -332,11 +319,7 @@ export const projects = [
         documents: [
             { label: "Project Brochure", status: "Not Uploaded", icon: "document-text-outline", tone: "danger" },
         ],
-        journey: [
-            { label: "New Lead Added", note: "04 May . 4:15 PM", state: "done" },
-            { label: "First Contact Attempted", note: "06 May . No response.", state: "done" },
-            { label: "Follow-up Needed", note: "Call owner after office hours.", state: "current" },
-        ],
+        journeyStage: "Follow-up",
         followUps: [
             {
                 id: "park-follow-1",
