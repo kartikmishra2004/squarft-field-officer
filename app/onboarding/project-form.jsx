@@ -30,12 +30,13 @@ import {
     updateStep4Approval,
     updateStep5,
     updateStep6,
+    bulkUploadProject,
     bulkUploadSubtype,
     resetForm,
     setProjectId,
     setUploadMode,
 } from "../../store/slices/projectSlice";
-import { addProject } from "../../store/slices/projectsSlice";
+import { completeProjectOnboarding, saveProjectOnboardingDraft, selectProjectById } from "../../store/slices/projectsSlice";
 import { addNotification } from "../../store/slices/notificationSlice";
 import { projectFormApi } from "../../services/api";
 import * as FileSystem from 'expo-file-system/legacy';
@@ -132,9 +133,12 @@ export default function AddProject() {
     const { projectId: routeProjectId, id: routeId } = useLocalSearchParams();
     const { currentStep, step1, step2, step3, step4, step5, step6 } = useSelector((state) => state.project);
     const projectId = useSelector((state) => state.project.projectId);
+    const leadProjectId = routeProjectId || routeId;
+    const existingProject = useSelector((state) => selectProjectById(state, leadProjectId));
     const scrollRef = useRef(null);
     const [step1Errors, setStep1Errors] = useState({});
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [draftReady, setDraftReady] = useState(false);
 
     useEffect(() => {
         scrollRef.current?.scrollToPosition?.(0, 0, false);
@@ -142,10 +146,30 @@ export default function AddProject() {
     }, [currentStep]);
 
     useEffect(() => {
+        setDraftReady(false);
         dispatch(resetForm());
-        dispatch(setStep(2));
-        dispatch(setProjectId(routeProjectId || routeId || `onboarding-${Date.now()}`));
-    }, [dispatch, routeId, routeProjectId]);
+        if (existingProject?.onboardingDraft?.form) {
+            dispatch(bulkUploadProject(existingProject.onboardingDraft.form));
+            dispatch(setStep(existingProject.onboardingDraft.currentStep || 2));
+        } else if (existingProject) {
+            dispatch(
+                updateStep1({
+                    projectName: existingProject.projectName || "",
+                    location: existingProject.fullAddress || existingProject.location || "",
+                    city: existingProject.city || "",
+                    salesOfficerName: existingProject.contactPerson || "",
+                    salesOfficerContact: existingProject.phoneNumber || "",
+                    responsiblePersonName: existingProject.contactPerson || existingProject.developerName || "",
+                    responsiblePersonContact: existingProject.phoneNumber || "",
+                }),
+            );
+            dispatch(setStep(2));
+        } else {
+            dispatch(setStep(2));
+        }
+        dispatch(setProjectId(leadProjectId || `onboarding-${Date.now()}`));
+        setDraftReady(true);
+    }, [dispatch, leadProjectId]);
 
     const validateStep1Fields = (values) => {
         const errors = {};
@@ -187,6 +211,41 @@ export default function AddProject() {
 
         return { valid: Object.keys(errors).length === 0, errors };
     };
+
+    const buildOnboardingData = (mediaItems = []) => ({
+        basicDetails: step1,
+        propertyTypes: step2.selectedTypes,
+        propertyDetails: step3.unitConfigs,
+        approvals: step4,
+        finance: step5,
+        media: {
+            images: step6.images,
+            documents: step6.documents,
+            uploadedMedia: mediaItems,
+        },
+        completedAt: new Date().toISOString(),
+    });
+
+    useEffect(() => {
+        if (!draftReady || !projectId) return;
+
+        dispatch(
+            saveProjectOnboardingDraft({
+                projectId,
+                draft: {
+                    currentStep,
+                    form: {
+                        step1,
+                        step2,
+                        step3,
+                        step4,
+                        step5,
+                        step6,
+                    },
+                },
+            }),
+        );
+    }, [currentStep, dispatch, draftReady, projectId, step1, step2, step3, step4, step5, step6]);
 
     const handleNext = async () => {
         if (currentStep === 1) {
@@ -413,12 +472,7 @@ export default function AddProject() {
             }
 
             if (!shouldUseProjectFormApi) {
-                dispatch(addProject({
-                    id: projectId,
-                    ...step1,
-                    status: 'Active',
-                    createdAt: new Date().toISOString(),
-                }));
+                dispatch(completeProjectOnboarding({ projectId, onboardingData: buildOnboardingData() }));
                 dispatch(addNotification({
                     title: "Project onboarding saved",
                     description: `${step1.projectName || "Project"} onboarding details have been saved locally.`,
@@ -456,12 +510,7 @@ export default function AddProject() {
 
                 await projectFormApi.finalizeStep6(projectId, { media: mediaItems });
 
-                dispatch(addProject({
-                    id: projectId,
-                    ...step1,
-                    status: 'Active',
-                    createdAt: new Date().toISOString(),
-                }));
+                dispatch(completeProjectOnboarding({ projectId, onboardingData: buildOnboardingData(mediaItems) }));
                 dispatch(addNotification({
                     title: "Project added successfully",
                     description: `${step1.projectName || "New project"} has been added to your project panel.`,

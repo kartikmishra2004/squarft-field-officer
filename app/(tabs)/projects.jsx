@@ -4,9 +4,9 @@ import { StatusBar } from "expo-status-bar";
 import { useMemo, useState } from "react";
 import { Linking, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { projectFilters } from "../../data/projectsData";
-import { selectProjects } from "../../store/slices/projectsSlice";
+import { markProjectContacted, selectProjects } from "../../store/slices/projectsSlice";
 
 const typeStyles = {
     Hot: { bg: "#FEE2E2", text: "#B91C1C" },
@@ -15,8 +15,12 @@ const typeStyles = {
 };
 
 const statusStyles = {
+    newLead: { bg: "#E0F2FE", text: "#0369A1" },
+    contacted: { bg: "#E0F2FE", text: "#0369A1" },
     followUp: { bg: "#FFF7ED", text: "#EA580C" },
     meeting: { bg: "#F1EFFF", text: "#4A43EC" },
+    interested: { bg: "#DCFCE7", text: "#16A34A" },
+    live: { bg: "#DCFCE7", text: "#16A34A" },
 };
 
 function openUrl(url) {
@@ -25,6 +29,7 @@ function openUrl(url) {
 
 export default function Projects() {
     const router = useRouter();
+    const dispatch = useDispatch();
     const projects = useSelector(selectProjects);
     const [activeFilter, setActiveFilter] = useState("all");
     const [query, setQuery] = useState("");
@@ -34,7 +39,7 @@ export default function Projects() {
 
         return projects.filter((project) => {
             const matchesFilter = activeFilter === "all" || project.statusType === activeFilter;
-            const matchesSearch = !searchText || project.projectName.toLowerCase().includes(searchText);
+            const matchesSearch = !searchText || project.projectName?.toLowerCase().includes(searchText);
 
             return matchesFilter && matchesSearch;
         });
@@ -125,9 +130,11 @@ export default function Projects() {
                                                 </Text>
                                             </View>
                                         </View>
-                                        <Text className="mt-0.5 text-[11px] text-[#64748B]" numberOfLines={1}>
-                                            {project.developerName} . {project.location}
-                                        </Text>
+                                        {[project.developerName, project.location || project.city].filter(Boolean).length ? (
+                                            <Text className="mt-0.5 text-[11px] text-[#64748B]" numberOfLines={1}>
+                                                {[project.developerName, project.location || project.city].filter(Boolean).join(" . ")}
+                                            </Text>
+                                        ) : null}
                                     </View>
 
                                     <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: statusStyle.bg }}>
@@ -140,17 +147,20 @@ export default function Projects() {
                                 <View className="mt-2.5 rounded-[10px] bg-[#F8F9FF] px-2.5 py-2">
                                     <Text className="text-[9px] text-[#64748B]">Next action</Text>
                                     <Text className="mt-0.5 text-[12px] font-semibold text-[#111827]">
-                                        {project.nextAction}
+                                        {project.nextAction || "No next action"}
                                     </Text>
                                 </View>
 
                                 <View className="mt-2.5 flex-row items-center justify-between">
-                                    <Text className="text-[10px] text-[#94A3B8]">Last contact: {project.lastContact}</Text>
+                                    <Text className="text-[10px] text-[#94A3B8]">Last contact: {project.lastContact || "Not contacted"}</Text>
 
                                     <View className="flex-row items-center">
                                         <TouchableOpacity
                                             activeOpacity={0.8}
-                                            onPress={() => openUrl(`tel:${project.phoneNumber}`)}
+                                            onPress={() => {
+                                                dispatch(markProjectContacted(project.id));
+                                                openUrl(`tel:${project.phoneNumber}`);
+                                            }}
                                             className="mr-2 h-7 w-7 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC]"
                                         >
                                             <Ionicons name="call-outline" size={13} color="#475569" />

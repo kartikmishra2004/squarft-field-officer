@@ -26,6 +26,8 @@ import {
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useDispatch } from "react-redux";
+import { addProject } from "../store/slices/projectsSlice";
 
 const { width } = Dimensions.get("window");
 
@@ -69,15 +71,8 @@ const subTypeOptions = {
     Apartment: ["1bhk", "2bhk", "3bhk", "4bhk", "5+bhk"],
     Office: ["Ready to move", "Co-working", "Bare shell"],
 };
-const leadStages = [
-    "New Lead",
-    "Contacted",
-    "Builder Asked to Call Later",
-    "Follow-up Required",
-    "Meeting Scheduled",
-    "Interested",
-];
-const interactionTypes = ["Call", "WhatsApp", "Site Visit", "Office Visit", "Reference"];
+const leadStages = ["New Lead"];
+const interactionTypes = ["Call", "Site Visit", "Office Visit", "Reference"];
 const priorities = ["Hot", "Warm", "Cold"];
 const followUpTimeOptions = [
     "09:00 AM",
@@ -116,6 +111,39 @@ function getFollowUpDateLabel(date, index) {
         day: "numeric",
         month: "short",
     });
+}
+
+function createProjectId(projectName) {
+    const slug = projectName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+
+    return `${slug || "project"}-${Date.now()}`;
+}
+
+function formatAddedDate(date) {
+    return date.toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+    });
+}
+
+function resetLeadForm() {
+    return {
+        projectName: "",
+        builderName: "",
+        contactPerson: "",
+        mobile: "",
+        city: "",
+        area: "",
+        colony: "",
+        fullAddress: "",
+        builderNotes: "",
+        followUpDate: "",
+    };
 }
 
 function Field({ label, placeholder, value, onChangeText, keyboardType, containerClassName = "" }) {
@@ -324,21 +352,10 @@ function PriorityChip({ label, active, onPress }) {
 }
 
 export default function ProjectLeadFormSheet({ visible, translateY, screenHeight, onClose }) {
+    const dispatch = useDispatch();
     const [currentStep, setCurrentStep] = useState(0);
     const scrollRef = useRef(null);
-    const [form, setForm] = useState({
-        projectName: "",
-        builderName: "",
-        contactPerson: "",
-        mobile: "",
-        whatsapp: "",
-        city: "",
-        area: "",
-        colony: "",
-        fullAddress: "",
-        builderNotes: "",
-        followUpDate: "",
-    });
+    const [form, setForm] = useState(resetLeadForm);
     const [category, setCategory] = useState("Residential");
     const [projectType, setProjectType] = useState("");
     const [subType, setSubType] = useState("");
@@ -441,17 +458,59 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
     };
 
     const handleSave = () => {
-        console.log("Saving lead:", {
-            form,
-            category,
-            projectType,
-            subType,
-            leadStage,
-            interactionType,
-            priority,
-            voiceNoteUri,
-            voiceNoteDuration,
-        });
+        const now = new Date();
+        const projectName = form.projectName.trim();
+        const developerName = form.builderName.trim();
+        const phoneNumber = form.mobile.trim();
+        const city = form.city.trim();
+        const area = form.area.trim();
+
+        if (!projectName || !developerName || !phoneNumber) {
+            Alert.alert("Missing details", "Project name, builder name, and mobile number are required.");
+            return;
+        }
+
+        dispatch(
+            addProject({
+                id: createProjectId(projectName),
+                projectName,
+                developerName,
+                contactPerson: form.contactPerson.trim(),
+                phoneNumber,
+                city,
+                location: area,
+                area,
+                colony: form.colony.trim(),
+                fullAddress: form.fullAddress.trim(),
+                category,
+                projectType: [category, projectType, subType].filter(Boolean).join(" . "),
+                type: priority,
+                status: "New Lead",
+                statusType: "newLead",
+                nextAction: "Call builder",
+                lastContact: "Not contacted",
+                addedOn: formatAddedDate(now),
+                createdAt: now.toISOString(),
+                leadStage,
+                interactionType,
+                builderNotes: form.builderNotes.trim(),
+                plannedFollowUpAt: form.followUpDate,
+                voiceNoteUri,
+                voiceNoteDuration,
+                journeyStage: "New Lead Added",
+                followUps: [],
+                meetings: [],
+            }),
+        );
+        setForm(resetLeadForm());
+        setCategory("Residential");
+        setProjectType("");
+        setSubType("");
+        setLeadStage("New Lead");
+        setInteractionType("Call");
+        setPriority("Hot");
+        setVoiceNoteUri(null);
+        setVoiceNoteDuration(0);
         handleClose();
     };
 
@@ -695,17 +754,9 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                             <View className="mb-4 flex-row" style={{ columnGap: 10 }}>
                                 <Field
                                     label="Mobile *"
-                                    placeholder="**********"
+                                    placeholder="+91 98765 43210"
                                     value={form.mobile}
                                     onChangeText={setField("mobile")}
-                                    keyboardType="phone-pad"
-                                    containerClassName="flex-1"
-                                />
-                                <Field
-                                    label="WhatsApp"
-                                    placeholder="***********"
-                                    value={form.whatsapp}
-                                    onChangeText={setField("whatsapp")}
                                     keyboardType="phone-pad"
                                     containerClassName="flex-1"
                                 />

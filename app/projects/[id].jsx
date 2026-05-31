@@ -1,15 +1,29 @@
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView, BottomSheetTextInput } from "@gorhom/bottom-sheet";
 import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
+import {
+    RecordingPresets,
+    requestRecordingPermissionsAsync,
+    setAudioModeAsync,
+    useAudioPlayer,
+    useAudioPlayerStatus,
+    useAudioRecorder,
+    useAudioRecorderState,
+} from "expo-audio";
 import * as ImagePicker from "expo-image-picker";
 import { router, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useMemo, useRef, useState } from "react";
-import { Linking, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Linking, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
-import { projectJourneyTemplate } from "../../data/projectsData";
-import { addProjectFollowUp, addProjectMeeting, selectProjectById } from "../../store/slices/projectsSlice";
+import {
+    addProjectFollowUp,
+    addProjectMeeting,
+    markProjectActivityDone,
+    markProjectContacted,
+    selectProjectById,
+} from "../../store/slices/projectsSlice";
 
 const typeStyles = {
     Hot: { bg: "#FEE2E2", text: "#B91C1C" },
@@ -18,21 +32,12 @@ const typeStyles = {
 };
 
 const statusStyles = {
+    newLead: { bg: "#E0F2FE", text: "#0369A1" },
+    contacted: { bg: "#E0F2FE", text: "#0369A1" },
     followUp: { bg: "#FFF7ED", text: "#EA580C" },
     meeting: { bg: "#F1EFFF", text: "#4A43EC" },
-};
-
-const documentToneStyles = {
-    success: { bg: "#DCFCE7", text: "#16A34A" },
-    warning: { bg: "#FEF3C7", text: "#D97706" },
-    danger: { bg: "#FFEDD5", text: "#DC2626" },
-};
-
-const stepStatusStyles = {
-    Done: { bg: "#DCFCE7", text: "#16A34A" },
-    Pending: { bg: "#FEF3C7", text: "#D97706" },
-    "Not Started": { bg: "#FFEDD5", text: "#DC2626" },
-    Waiting: { bg: "#F1F5F9", text: "#94A3B8" },
+    interested: { bg: "#DCFCE7", text: "#16A34A" },
+    live: { bg: "#DCFCE7", text: "#16A34A" },
 };
 
 const followUpToneStyles = {
@@ -66,15 +71,26 @@ const meetingTypes = ["Site Meeting", "Builder Office", "SquarFT Office", "Phone
 const meetingStatuses = ["Scheduled", "Today", "Tomorrow", "Planned", "Done"];
 const meetingAgenda = ["Company Introduction", "Project Collaboration Discussion", "Pricing Discussion", "Inventory Collection", "Document Collection"];
 const reminderOptions = ["30 minutes before", "1 hour before", "2 hours before", "1 day before"];
-const defaultProjectJourneyStage = "Meeting Scheduled";
+const projectJourneyTemplate = [
+    "New Lead Added",
+    "First Contact",
+    "Follow-up",
+    "Meeting Scheduled",
+    "Interested",
+    "Project live",
+];
+const defaultProjectJourneyStage = "New Lead Added";
 
-function getProjectJourney(stage = defaultProjectJourneyStage) {
-    const stageIndex = projectJourneyTemplate.findIndex((item) => item.label === stage);
-    const fallbackIndex = projectJourneyTemplate.findIndex((item) => item.label === defaultProjectJourneyStage);
+function getProjectJourney(project) {
+    const stage = project.journeyStage || defaultProjectJourneyStage;
+    const stageIndex = projectJourneyTemplate.findIndex((item) => item === stage);
+    const fallbackIndex = projectJourneyTemplate.findIndex((item) => item === defaultProjectJourneyStage);
     const currentIndex = stageIndex >= 0 ? stageIndex : Math.max(0, fallbackIndex);
+    const stageHistory = project.stageHistory || [];
 
-    return projectJourneyTemplate.map((item, index) => ({
-        ...item,
+    return projectJourneyTemplate.map((label, index) => ({
+        label,
+        note: stageHistory.find((item) => item.stage === label)?.note,
         state: index < currentIndex ? "done" : index === currentIndex ? "current" : "upcoming",
     }));
 }
@@ -122,6 +138,14 @@ function formatDate(date) {
 
 function formatTime(date) {
     return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+function formatDuration(durationMillis = 0) {
+    const totalSeconds = Math.max(0, Math.floor(durationMillis / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = String(totalSeconds % 60).padStart(2, "0");
+
+    return `${minutes}:${seconds}`;
 }
 
 function buildDateTime(dateValue, timeValue) {
@@ -326,6 +350,16 @@ function FollowUpForm({ project, onSave }) {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [sitePhoto, setSitePhoto] = useState(null);
+    const [voiceNoteUri, setVoiceNoteUri] = useState(null);
+    const [voiceNoteDuration, setVoiceNoteDuration] = useState(0);
+    const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+    const recorderState = useAudioRecorderState(audioRecorder, 250);
+    const voicePlayer = useAudioPlayer(voiceNoteUri ? { uri: voiceNoteUri } : null, {
+        updateInterval: 250,
+    });
+    const voicePlayerStatus = useAudioPlayerStatus(voicePlayer);
+    const isRecordingVoiceNote = recorderState.isRecording;
+    const isPlayingVoiceNote = voicePlayerStatus.playing;
 
     const pickSitePhoto = async () => {
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -363,9 +397,93 @@ function FollowUpForm({ project, onSave }) {
                 nextAction,
                 nextFollowUpAt: nextDate.toISOString(),
                 sitePhoto,
+                voiceNoteUri,
+                voiceNoteDuration,
             },
         });
     };
+
+    const startVoiceRecording = async () => {
+        try {
+            const permission = await requestRecordingPermissionsAsync();
+
+            if (!permission.granted) {
+                Alert.alert("Microphone permission needed", "Please allow microphone access to record a voice note.");
+                return;
+            }
+
+            if (isPlayingVoiceNote) {
+                voicePlayer.pause();
+            }
+
+            setVoiceNoteUri(null);
+            setVoiceNoteDuration(0);
+            await setAudioModeAsync({
+                allowsRecording: true,
+                playsInSilentMode: true,
+            });
+            await audioRecorder.prepareToRecordAsync();
+            audioRecorder.record();
+        } catch {
+            Alert.alert("Recording failed", "Could not start voice recording. Please try again.");
+        }
+    };
+
+    const stopVoiceRecording = async () => {
+        try {
+            const duration = recorderState.durationMillis;
+
+            await audioRecorder.stop();
+            await setAudioModeAsync({
+                allowsRecording: false,
+                playsInSilentMode: true,
+            });
+
+            const uri = audioRecorder.uri || recorderState.url;
+            if (uri) {
+                setVoiceNoteUri(uri);
+                setVoiceNoteDuration(duration);
+            }
+        } catch {
+            Alert.alert("Recording failed", "Could not save the voice note. Please try again.");
+        }
+    };
+
+    const toggleVoiceRecording = () => {
+        if (isRecordingVoiceNote) {
+            stopVoiceRecording();
+            return;
+        }
+
+        startVoiceRecording();
+    };
+
+    const toggleVoicePlayback = async () => {
+        if (!voiceNoteUri) return;
+
+        if (isPlayingVoiceNote) {
+            voicePlayer.pause();
+            return;
+        }
+
+        await voicePlayer.seekTo(0);
+        voicePlayer.play();
+    };
+
+    const deleteVoiceNote = () => {
+        if (isPlayingVoiceNote) {
+            voicePlayer.pause();
+        }
+
+        setVoiceNoteUri(null);
+        setVoiceNoteDuration(0);
+    };
+
+    useEffect(() => {
+        if (voicePlayerStatus.didJustFinish) {
+            voicePlayer.seekTo(0);
+        }
+    }, [voicePlayer, voicePlayerStatus.didJustFinish]);
 
     return (
         <BottomSheetScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}>
@@ -471,15 +589,50 @@ function FollowUpForm({ project, onSave }) {
                 onClose={() => setShowTimePicker(false)}
             />
 
-            <TouchableOpacity activeOpacity={0.85} className="mt-3 rounded-[10px] bg-[#F1F3FA] p-3">
+            <TouchableOpacity activeOpacity={0.85} onPress={toggleVoiceRecording} className="mt-3 rounded-[10px] bg-[#F1F3FA] p-3">
                 <View className="flex-row items-center">
-                    <Ionicons name="mic-outline" size={17} color="#4A43EC" />
+                    <Ionicons name={isRecordingVoiceNote ? "stop-circle-outline" : "mic-outline"} size={17} color={isRecordingVoiceNote ? "#EF4444" : "#4A43EC"} />
                     <View className="ml-2">
-                        <Text className="text-[11px] font-lato-bold text-[#111827]">Add Voice Note</Text>
-                        <Text className="text-[9px] text-[#64748B]">Tap to record</Text>
+                        <Text className="text-[11px] font-lato-bold text-[#111827]">
+                            {isRecordingVoiceNote ? "Stop Recording" : "Add Voice Note"}
+                        </Text>
+                        <Text className="text-[9px] text-[#64748B]">
+                            {isRecordingVoiceNote ? formatDuration(recorderState.durationMillis) : voiceNoteUri ? "Recorded" : "Tap to record"}
+                        </Text>
                     </View>
                 </View>
             </TouchableOpacity>
+            {voiceNoteUri && !isRecordingVoiceNote ? (
+                <View className="mt-2 flex-row items-center rounded-[10px] bg-white p-2.5">
+                    <TouchableOpacity
+                        activeOpacity={0.82}
+                        onPress={toggleVoicePlayback}
+                        className="h-9 w-9 items-center justify-center rounded-full bg-[#4A43EC]"
+                    >
+                        <Ionicons name={isPlayingVoiceNote ? "pause" : "play"} size={17} color="#FFFFFF" />
+                    </TouchableOpacity>
+                    <View className="mx-3 h-2 flex-1 overflow-hidden rounded-full bg-[#E5E7EB]">
+                        <View
+                            className="h-2 rounded-full bg-[#4A43EC]"
+                            style={{
+                                width: `${
+                                    voicePlayerStatus.duration
+                                        ? Math.min((voicePlayerStatus.currentTime / voicePlayerStatus.duration) * 100, 100)
+                                        : 0
+                                }%`,
+                            }}
+                        />
+                    </View>
+                    <Text className="mr-3 text-[12px] font-lato text-[#6B7280]">{formatDuration(voiceNoteDuration)}</Text>
+                    <TouchableOpacity
+                        activeOpacity={0.82}
+                        onPress={deleteVoiceNote}
+                        className="h-9 w-9 items-center justify-center rounded-full bg-[#F3F4F6]"
+                    >
+                        <Ionicons name="trash-outline" size={17} color="#EF4444" />
+                    </TouchableOpacity>
+                </View>
+            ) : null}
 
             <TouchableOpacity activeOpacity={0.85} onPress={pickSitePhoto} className="mt-2 rounded-[10px] bg-[#F1F3FA] p-3">
                 <View className="flex-row items-center">
@@ -529,8 +682,8 @@ function MeetingForm({ project, onSave }) {
             developerName: project.developerName,
             phoneNumber: project.phoneNumber,
             location: location.trim() || project.location,
-            latitude: project.latitude ?? 22.7533,
-            longitude: project.longitude ?? 75.8937,
+            latitude: project.latitude,
+            longitude: project.longitude,
             type: meetingType,
             time: formatTime(scheduledAt),
             status: meetingStatus,
@@ -680,7 +833,7 @@ function ProjectJourney({ items }) {
                             >
                                 {item.label}
                             </Text>
-                            <Text className="mt-0.5 text-[10px] text-[#94A3B8]">{item.note}</Text>
+                            {item.note ? <Text className="mt-0.5 text-[10px] text-[#94A3B8]">{item.note}</Text> : null}
                         </View>
                     </View>
                 );
@@ -691,48 +844,47 @@ function ProjectJourney({ items }) {
 
 function Overview({ project }) {
     const typeStyle = typeStyles[project.type] ?? typeStyles.Warm;
+    const hasCompletedFollowUp = (project.followUps || []).some((item) => item.isDone || item.status === "Done");
+    const hasCompletedMeeting = (project.meetings || []).some((item) => item.isDone || item.status === "Done");
+    const canContinueOnboarding = hasCompletedFollowUp && hasCompletedMeeting;
+    const projectInfo = [
+        ["Builder", project.developerName],
+        ["Contact Person", project.contactPerson],
+        ["Type", project.projectType],
+        ["Contact", project.phoneNumber],
+        ["WhatsApp", project.whatsappNumber],
+        ["City", project.city],
+        ["Area", project.area || project.location],
+        ["Colony / Landmark", project.colony],
+        ["Address", project.fullAddress],
+        ["Added", project.addedOn],
+        ["Lead Type", project.type],
+        ["Notes", project.builderNotes],
+    ].filter(([, value]) => Boolean(value));
+    const onboardingDraftForm = project.onboardingDraft?.form;
+    const propertyTypes = project.onboardingData?.propertyTypes ?? onboardingDraftForm?.step2?.selectedTypes;
+    const approvals = project.onboardingData?.approvals ?? onboardingDraftForm?.step4;
+    const finance = project.onboardingData?.finance ?? onboardingDraftForm?.step5;
+    const media = project.onboardingData?.media ?? onboardingDraftForm?.step6;
+    const onboardingInfo = propertyTypes || approvals || finance || media
+        ? [
+              ["Property Types", propertyTypes?.map((item) => `${item.mainType} . ${item.subType}`).join(", ")],
+              ["Approval Status", approvals?.overallApprovalStatus],
+              ["Possession Status", approvals?.possessionStatus],
+              ["Development Progress", approvals?.developmentCompletionPercentage ? `${approvals.developmentCompletionPercentage}%` : ""],
+              ["Loan Available", finance?.loanAvailable],
+              ["Ownership Type", finance?.ownershipType],
+              ["Images", media?.images?.length ? `${media.images.length} added` : ""],
+              ["Documents", media?.documents?.length ? `${media.documents.length} added` : ""],
+          ].filter(([, value]) => Boolean(value))
+        : [];
 
     return (
         <View className="px-4 pt-3">
-            <ProjectJourney items={getProjectJourney(project.journeyStage)} />
-
-            <View className="mb-3 flex-row">
-                <View className="mr-2.5 w-[34%] rounded-[12px] border border-[#E5E7EB] bg-white p-3">
-                    <View className="mx-auto h-12 w-12 items-center justify-center rounded-full border-[5px] border-[#4A43EC]">
-                        <Text className="text-[14px] font-lato-bold text-[#4A43EC]">{project.leadScore}</Text>
-                    </View>
-                    <Text className="mt-2 text-center text-[10px] font-lato-bold text-[#4A43EC]">Lead Score</Text>
-                    <Text className="mt-0.5 text-center text-[9px] text-[#94A3B8]">{project.leadProbability}</Text>
-                </View>
-
-                <View className="flex-1 rounded-[12px] border border-[#E5E7EB] bg-white p-3">
-                    <View className="flex-row items-center justify-between">
-                        <Text className="text-[10px] font-lato-bold uppercase tracking-[1px] text-[#64748B]">
-                            Relationship Health
-                        </Text>
-                        <Text className="text-[12px] font-lato-bold text-[#16A34A]">{project.relationshipHealth}%</Text>
-                    </View>
-                    <ProgressBar value={project.relationshipHealth} color="#22C55E" />
-                    <Text className="mt-2 text-[10px] text-[#64748B]">{project.relationshipNote}</Text>
-                    <View className="mt-2 flex-row flex-wrap">
-                        {project.relationshipTags.map((tag) => (
-                            <View key={tag} className="mb-1 mr-2 rounded-full bg-[#DCFCE7] px-2 py-1">
-                                <Text className="text-[9px] font-semibold text-[#16A34A]">{tag}</Text>
-                            </View>
-                        ))}
-                    </View>
-                </View>
-            </View>
+            <ProjectJourney items={getProjectJourney(project)} />
 
             <Section title="Project Info">
-                {[
-                    ["Builder", project.developerName],
-                    ["Type", project.projectType],
-                    ["Contact", project.phoneNumber],
-                    ["Source", project.source],
-                    ["Added", project.addedOn],
-                    ["Lead Type", project.type],
-                ].map(([label, value]) => (
+                {projectInfo.map(([label, value]) => (
                     <View key={label} className="flex-row justify-between border-b border-[#F1F5F9] py-2 last:border-b-0">
                         <Text className="text-[11px] text-[#64748B]">{label}</Text>
                         <Text className="ml-4 flex-1 text-right text-[11px] font-lato-bold text-[#111827]">{value}</Text>
@@ -745,61 +897,51 @@ function Overview({ project }) {
 
             <Section
                 title="Onboarding Progress"
-                action={<Text className="text-[13px] font-lato-bold text-[#4A43EC]">{project.onboardingProgress}%</Text>}
+                action={<Text className="text-[13px] font-lato-bold text-[#4A43EC]">{project.onboardingProgress || 0}%</Text>}
             >
-                <ProgressBar value={project.onboardingProgress} color="#4A43EC" trackColor="#DDE1EA" height={7} />
-                <View className="mt-3">
-                    {project.onboardingSteps.map((step) => {
-                        const stepStyle = stepStatusStyles[step.status] ?? stepStatusStyles.Pending;
-
-                        return (
-                            <View key={step.label} className="flex-row items-center justify-between border-b border-[#F1F5F9] py-2">
-                                <Text className="text-[11px] text-[#111827]">{step.label}</Text>
-                                <Badge label={step.status} styleSet={stepStyle} />
+                <ProgressBar value={project.onboardingProgress || 0} color="#4A43EC" trackColor="#DDE1EA" height={7} />
+                {onboardingInfo.length ? (
+                    <View className="mt-3">
+                        {onboardingInfo.map(([label, value]) => (
+                            <View key={label} className="flex-row justify-between border-b border-[#F1F5F9] py-2 last:border-b-0">
+                                <Text className="text-[11px] text-[#64748B]">{label}</Text>
+                                <Text className="ml-4 flex-1 text-right text-[11px] font-lato-bold text-[#111827]">{value}</Text>
                             </View>
-                        );
-                    })}
-                </View>
+                        ))}
+                    </View>
+                ) : null}
                 <TouchableOpacity
-                    activeOpacity={0.85}
+                    activeOpacity={canContinueOnboarding ? 0.85 : 1}
+                    disabled={!canContinueOnboarding}
                     onPress={() => router.push({ pathname: "/onboarding/project-form", params: { projectId: project.id } })}
-                    className="mt-3 h-10 items-center justify-center rounded-[10px] bg-[#4A43EC]"
+                    className={`mt-3 h-10 items-center justify-center rounded-[10px] ${canContinueOnboarding ? "bg-[#4A43EC]" : "bg-[#CBD5E1]"}`}
                 >
                     <Text className="text-[12px] font-lato-bold text-white">Continue Onboarding {">"}</Text>
                 </TouchableOpacity>
+                {!canContinueOnboarding ? (
+                    <Text className="mt-2 text-center text-[10px] text-[#64748B]">
+                        (At least 1 meeting and 1 follow up required with done status)
+                    </Text>
+                ) : null}
             </Section>
 
-            <Section
-                title="Documents"
-                action={
-                    <TouchableOpacity activeOpacity={0.8} className="h-7 flex-row items-center rounded-[8px] bg-[#4A43EC] px-2.5">
-                        <Ionicons name="cloud-upload-outline" size={12} color="#fff" />
-                        <Text className="ml-1 text-[10px] font-lato-bold text-white">Upload</Text>
-                    </TouchableOpacity>
-                }
-            >
-                {project.documents.map((document) => {
-                    const tone = documentToneStyles[document.tone] ?? documentToneStyles.warning;
-
-                    return (
-                        <View
-                            key={document.label}
-                            className="flex-row items-center justify-between border-b border-[#F1F5F9] py-2 last:border-b-0"
-                        >
-                            <View className="flex-row items-center">
-                                <Ionicons name={document.icon} size={14} color={tone.text} />
-                                <Text className="ml-2 text-[11px] text-[#111827]">{document.label}</Text>
-                            </View>
-                            <Badge label={document.status} styleSet={tone} />
+            {media?.documents?.length ? (
+                <Section title="Documents">
+                    {media.documents.map((document, index) => (
+                        <View key={`${document.name || document.uri}-${index}`} className="flex-row items-center border-b border-[#F1F5F9] py-2 last:border-b-0">
+                            <Ionicons name="document-text-outline" size={14} color="#16A34A" />
+                            <Text className="ml-2 flex-1 text-[11px] text-[#111827]" numberOfLines={1}>
+                                {document.name || document.fileName || document.uri}
+                            </Text>
                         </View>
-                    );
-                })}
-            </Section>
+                    ))}
+                </Section>
+            ) : null}
         </View>
     );
 }
 
-function FollowUpCard({ item }) {
+function FollowUpCard({ item, onDone }) {
     const tone = followUpToneStyles[item.tone] ?? followUpToneStyles.warning;
 
     return (
@@ -835,7 +977,11 @@ function FollowUpCard({ item }) {
                     <Ionicons name="call" size={12} color="#fff" />
                     <Text className="ml-1.5 text-[11px] font-lato-bold text-white">Call</Text>
                 </TouchableOpacity>
-                <TouchableOpacity activeOpacity={0.85} className="h-8 flex-1 items-center justify-center rounded-[9px] bg-[#EBF1FF]">
+                <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => onDone(item.id)}
+                    className="h-8 flex-1 items-center justify-center rounded-[9px] bg-[#EBF1FF]"
+                >
                     <Text className="text-[11px] font-lato-bold text-[#4A43EC]">Done</Text>
                 </TouchableOpacity>
             </View>
@@ -843,7 +989,7 @@ function FollowUpCard({ item }) {
     );
 }
 
-function MeetingCard({ item }) {
+function MeetingCard({ item, onDone }) {
     const tone = meetingToneStyles[item.tone] ?? meetingToneStyles.primary;
 
     return (
@@ -873,13 +1019,23 @@ function MeetingCard({ item }) {
                 </Text>
             </View>
             <View className="mt-2 flex-row items-center">
-                <TouchableOpacity activeOpacity={0.85} className="mr-2 h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#4A43EC]">
-                    <Ionicons name="play-outline" size={12} color="#fff" />
-                    <Text className="ml-1.5 text-[11px] font-lato-bold text-white">Start</Text>
+                <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => onDone(item.id)}
+                    className="mr-2 h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#4A43EC]"
+                >
+                    <Ionicons name="checkmark" size={12} color="#fff" />
+                    <Text className="ml-1.5 text-[11px] font-lato-bold text-white">Done</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                     activeOpacity={0.85}
-                    onPress={() => openUrl(`https://www.google.com/maps/search/?api=1&query=${item.latitude},${item.longitude}`)}
+                    onPress={() =>
+                        openUrl(
+                            item.latitude && item.longitude
+                                ? `https://www.google.com/maps/search/?api=1&query=${item.latitude},${item.longitude}`
+                                : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.location)}`,
+                        )
+                    }
                     className="h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#EBF1FF]"
                 >
                     <Ionicons name="location-outline" size={12} color="#4A43EC" />
@@ -890,8 +1046,8 @@ function MeetingCard({ item }) {
     );
 }
 
-function Activity({ project, activeActivityTab, onActivityTabChange }) {
-    const items = activeActivityTab === "followUp" ? project.followUps : project.meetings;
+function Activity({ project, activeActivityTab, onActivityTabChange, onActivityDone }) {
+    const items = (activeActivityTab === "followUp" ? project.followUps : project.meetings) || [];
 
     return (
         <View className="px-4 pt-3">
@@ -918,7 +1074,11 @@ function Activity({ project, activeActivityTab, onActivityTabChange }) {
             </View>
 
             {items.map((item) =>
-                activeActivityTab === "followUp" ? <FollowUpCard key={item.id} item={item} /> : <MeetingCard key={item.id} item={item} />,
+                activeActivityTab === "followUp" ? (
+                    <FollowUpCard key={item.id} item={item} onDone={(activityId) => onActivityDone("followUp", activityId)} />
+                ) : (
+                    <MeetingCard key={item.id} item={item} onDone={(activityId) => onActivityDone("meeting", activityId)} />
+                ),
             )}
 
             {!items.length ? (
@@ -976,6 +1136,18 @@ export default function ProjectDetail() {
         [closeSheet, dispatch, projectId],
     );
 
+    const callProject = useCallback(() => {
+        dispatch(markProjectContacted(projectId));
+        openUrl(`tel:${project?.phoneNumber || ""}`);
+    }, [dispatch, project?.phoneNumber, projectId]);
+
+    const markActivityDone = useCallback(
+        (activityType, activityId) => {
+            dispatch(markProjectActivityDone({ projectId, activityType, activityId }));
+        },
+        [dispatch, projectId],
+    );
+
     if (!project) {
         return (
             <View className="flex-1 bg-white">
@@ -1015,7 +1187,7 @@ export default function ProjectDetail() {
                                 <View className="mt-2 flex-row items-center">
                                     <Ionicons name="location-outline" size={12} color="#DDE2FF" />
                                     <Text className="ml-1 text-[11px] text-[#DDE2FF]">
-                                        {project.location}, {project.city}
+                                        {[project.location, project.city].filter(Boolean).join(", ")}
                                     </Text>
                                 </View>
                             </View>
@@ -1029,16 +1201,16 @@ export default function ProjectDetail() {
 
                         <View className="mt-3 flex-row items-center justify-between">
                             <Text className="text-[11px] text-white/90">Onboarding Progress</Text>
-                            <Text className="text-[12px] font-lato-bold text-white">{project.onboardingProgress}%</Text>
+                            <Text className="text-[12px] font-lato-bold text-white">{project.onboardingProgress || 0}%</Text>
                         </View>
-                        <ProgressBar value={project.onboardingProgress} color="#FFFFFF" trackColor="rgba(255,255,255,0.28)" height={7} />
+                        <ProgressBar value={project.onboardingProgress || 0} color="#FFFFFF" trackColor="rgba(255,255,255,0.28)" height={7} />
                     </View>
 
                     <View className="flex-1 bg-white">
                         <View className="flex-row border-b border-[#E5E7EB] bg-white px-4 py-2.5">
                             <TouchableOpacity
                                 activeOpacity={0.85}
-                                onPress={() => openUrl(`tel:${project.phoneNumber}`)}
+                                onPress={callProject}
                                 className="mr-2 h-8 flex-row items-center justify-center rounded-[8px] bg-[#4A43EC] px-3"
                             >
                                 <Ionicons name="call-outline" size={12} color="#fff" />
@@ -1094,6 +1266,7 @@ export default function ProjectDetail() {
                                     project={project}
                                     activeActivityTab={activeActivityTab}
                                     onActivityTabChange={setActiveActivityTab}
+                                    onActivityDone={markActivityDone}
                                 />
                             )}
                         </ScrollView>

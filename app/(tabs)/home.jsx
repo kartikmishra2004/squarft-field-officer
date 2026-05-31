@@ -4,18 +4,17 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import { Animated, Image, Linking, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import ProjectLeadFormSheet from "../../components/ProjectLeadFormSheet";
-import { followUps, meetings } from "../../data/homeData";
+import {
+    markProjectActivityDone,
+    markProjectContacted,
+    selectAllProjectFollowUps,
+    selectAllProjectMeetings,
+    selectProjects,
+} from "../../store/slices/projectsSlice";
 
 const profileImage = require("../../assets/images/profile-officer.png");
-
-const stats = [
-    { value: "123", label: "Total Leads" },
-    { value: "45", label: "Meeting" },
-    { value: "34", label: "Onboarding" },
-    { value: "14", label: "Live" },
-];
 
 const followUpToneStyles = {
     danger: {
@@ -73,10 +72,12 @@ function openMapLocation(latitude, longitude) {
 }
 
 export default function Home() {
+    const dispatch = useDispatch();
     const [activeTab, setActiveTab] = useState("meeting");
     const [leadFormOpen, setLeadFormOpen] = useState(false);
-    const [followUpItems, setFollowUpItems] = useState(followUps);
-    const [meetingItems, setMeetingItems] = useState(meetings);
+    const projects = useSelector(selectProjects);
+    const followUpItems = useSelector(selectAllProjectFollowUps);
+    const meetingItems = useSelector(selectAllProjectMeetings);
     const notifications = useSelector((state) => state.notifications?.list || []);
     const { height, width } = useWindowDimensions();
     const leadFormTranslateY = useRef(new Animated.Value(height)).current;
@@ -86,6 +87,12 @@ export default function Home() {
     const isFollowUp = activeTab === "followUp";
     const visibleFollowUps = followUpItems.filter((item) => !item.isDone);
     const visibleMeetings = meetingItems.filter((item) => !item.isDone);
+    const stats = [
+        { value: projects.length, label: "Total Leads" },
+        { value: projects.filter((project) => project.statusType === "meeting").length, label: "Meeting" },
+        { value: projects.filter((project) => project.statusType === "interested").length, label: "Onboarding" },
+        { value: projects.filter((project) => project.statusType === "live").length, label: "Live" },
+    ];
     const unreadNotifications = notifications.filter((item) => !item.watched).length;
     const controlsTranslateY = leadFormTranslateY.interpolate({
         inputRange: [0, Math.min(height, 260)],
@@ -121,11 +128,22 @@ export default function Home() {
     };
 
     const markFollowUpDone = (id) => {
-        setFollowUpItems((items) => items.map((item) => (item.id === id ? { ...item, isDone: true } : item)));
+        const item = followUpItems.find((followUp) => followUp.id === id);
+        if (item) {
+            dispatch(markProjectActivityDone({ projectId: item.projectId, activityType: "followUp", activityId: id }));
+        }
     };
 
     const markMeetingDone = (id) => {
-        setMeetingItems((items) => items.map((item) => (item.id === id ? { ...item, isDone: true } : item)));
+        const item = meetingItems.find((meeting) => meeting.id === id);
+        if (item) {
+            dispatch(markProjectActivityDone({ projectId: item.projectId, activityType: "meeting", activityId: id }));
+        }
+    };
+
+    const callProject = (projectId, phoneNumber) => {
+        dispatch(markProjectContacted(projectId));
+        callPhoneNumber(phoneNumber);
     };
 
     return (
@@ -332,7 +350,7 @@ export default function Home() {
                                         <View className="mt-2 flex-row items-center">
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
-                                                onPress={() => callPhoneNumber(item.phoneNumber)}
+                                                onPress={() => callProject(item.projectId, item.phoneNumber)}
                                                 className="mr-2 h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#4A43EC]"
                                             >
                                                 <Ionicons name="call" size={12} color="#fff" />
@@ -353,6 +371,14 @@ export default function Home() {
                                     </View>
                                 );
                             })}
+                            {!visibleFollowUps.length ? (
+                                <View className="mt-16 items-center">
+                                    <Ionicons name="calendar-outline" size={32} color="#CBD5E1" />
+                                    <Text className="mt-3 text-[14px] font-lato-bold text-[#64748B]">
+                                        No follow-ups available
+                                    </Text>
+                                </View>
+                            ) : null}
                         </View>
                     ) : (
                         <View className="px-4">
@@ -403,7 +429,7 @@ export default function Home() {
 
                                         <View className="mt-2 rounded-[9px] bg-[#F8F9FF] px-2.5 py-2">
                                             <Text className="text-[10px] leading-4 text-[#4B5563]">
-                                                Meet at {item.location} for {item.type.toLowerCase()}.
+                                                {item.meta?.notes || `Meet at ${item.location} for ${item.type.toLowerCase()}.`}
                                             </Text>
                                         </View>
 
@@ -432,6 +458,14 @@ export default function Home() {
                                     </View>
                                 );
                             })}
+                            {!visibleMeetings.length ? (
+                                <View className="mt-16 items-center">
+                                    <Ionicons name="calendar-outline" size={32} color="#CBD5E1" />
+                                    <Text className="mt-3 text-[14px] font-lato-bold text-[#64748B]">
+                                        No meetings available
+                                    </Text>
+                                </View>
+                            ) : null}
                         </View>
                     )}
                 </ScrollView>
