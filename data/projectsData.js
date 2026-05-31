@@ -6,4 +6,5 @@ export const projectFilters = [
     { key: "meeting", label: "Meeting" },
     { key: "interested", label: "Interested" },
     { key: "live", label: "Live" },
+    { key: "rejected", label: "Rejected" },
 ];

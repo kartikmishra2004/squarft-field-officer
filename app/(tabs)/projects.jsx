@@ -21,6 +21,7 @@ const statusStyles = {
     meeting: { bg: "#F1EFFF", text: "#4A43EC" },
     interested: { bg: "#DCFCE7", text: "#16A34A" },
     live: { bg: "#DCFCE7", text: "#16A34A" },
+    rejected: { bg: "#FEE2E2", text: "#B91C1C" },
 };
 
 function openUrl(url) {
@@ -70,7 +71,12 @@ export default function Projects() {
                         ) : null}
                     </View>
 
-                    <View className="mt-2.5 flex-row">
+                    <ScrollView
+                        horizontal
+                        className="mt-2.5"
+                        contentContainerStyle={{ paddingRight: 16 }}
+                        showsHorizontalScrollIndicator={false}
+                    >
                         {projectFilters.map((filter) => {
                             const isActive = activeFilter === filter.key;
                             const label = filter.key === "all" ? `${filter.label} (${projects.length})` : filter.label;
@@ -94,7 +100,7 @@ export default function Projects() {
                                 </TouchableOpacity>
                             );
                         })}
-                    </View>
+                    </ScrollView>
                 </View>
 
                 <ScrollView

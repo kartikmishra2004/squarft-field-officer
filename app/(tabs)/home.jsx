@@ -127,17 +127,15 @@ export default function Home() {
         }).start(() => setLeadFormOpen(false));
     };
 
-    const markFollowUpDone = (id) => {
-        const item = followUpItems.find((followUp) => followUp.id === id);
+    const markFollowUpDone = (item) => {
         if (item) {
-            dispatch(markProjectActivityDone({ projectId: item.projectId, activityType: "followUp", activityId: id }));
+            dispatch(markProjectActivityDone({ projectId: item.projectId, activityType: "followUp", activityId: item.id }));
         }
     };
 
-    const markMeetingDone = (id) => {
-        const item = meetingItems.find((meeting) => meeting.id === id);
+    const markMeetingDone = (item) => {
         if (item) {
-            dispatch(markProjectActivityDone({ projectId: item.projectId, activityType: "meeting", activityId: id }));
+            dispatch(markProjectActivityDone({ projectId: item.projectId, activityType: "meeting", activityId: item.id }));
         }
     };
 
@@ -360,7 +358,7 @@ export default function Home() {
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
-                                                onPress={() => markFollowUpDone(item.id)}
+                                                onPress={() => markFollowUpDone(item)}
                                                 className="h-8 flex-1 items-center justify-center rounded-[9px] bg-[#EBF1FF]"
                                             >
                                                 <Text className="text-[11px] font-lato-bold text-[#4A43EC]">
@@ -436,7 +434,7 @@ export default function Home() {
                                         <View className="mt-2 flex-row items-center">
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
-                                                onPress={() => markMeetingDone(item.id)}
+                                                onPress={() => markMeetingDone(item)}
                                                 className="mr-2 h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#4A43EC]"
                                             >
                                                 <Ionicons name="checkmark" size={12} color="#fff" />

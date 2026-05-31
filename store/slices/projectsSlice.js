@@ -6,6 +6,7 @@ const onboardingStages = [
     "Meeting Scheduled",
     "Interested",
     "Project live",
+    "Rejected",
 ];
 
 function ensureStage(project, stage, note) {
@@ -28,6 +29,8 @@ function getStageIndex(stage) {
 }
 
 function getProgress(stage) {
+    if (stage === "Project live" || stage === "Rejected") return 100;
+
     const index = getStageIndex(stage);
 
     return Math.round(((index + 1) / onboardingStages.length) * 100);
@@ -233,8 +236,10 @@ const projectsSlice = createSlice({
         },
         markProjectActivityDone: (state, action) => {
             const { projectId, activityType, activityId } = action.payload;
-            const project = state.items.find((item) => item.id === projectId);
             const collectionName = activityType === "meeting" ? "meetings" : "followUps";
+            const project =
+                state.items.find((item) => item.id === projectId) ||
+                state.items.find((item) => (item[collectionName] || []).some((activity) => activity.id === activityId));
 
             if (project) {
                 const activity = (project[collectionName] || []).find((item) => item.id === activityId);
@@ -242,6 +247,7 @@ const projectsSlice = createSlice({
                 if (activity) {
                     activity.isDone = true;
                     activity.status = "Done";
+                    activity.completedAt = new Date().toISOString();
                 }
 
                 project.lastContact = "Today";
@@ -276,6 +282,19 @@ const projectsSlice = createSlice({
                 project.onboardingProgress = 100;
             }
         },
+        rejectProjectLead: (state, action) => {
+            const project = state.items.find((item) => item.id === action.payload);
+
+            if (project) {
+                project.status = "Rejected";
+                project.statusType = "rejected";
+                project.nextAction = "Lead rejected";
+                project.lastContact = "Today";
+                project.onboardingDraft = null;
+                ensureStage(project, "Rejected", "Lead rejected");
+                project.onboardingProgress = 100;
+            }
+        },
         saveProjectOnboardingDraft: (state, action) => {
             const { projectId, draft } = action.payload;
             const project = state.items.find((item) => item.id === projectId);
@@ -297,6 +316,7 @@ export const {
     addProjectMeeting,
     markProjectActivityDone,
     completeProjectOnboarding,
+    rejectProjectLead,
     saveProjectOnboardingDraft,
 } = projectsSlice.actions;
 export const selectProjects = (state) => state.projects.items;

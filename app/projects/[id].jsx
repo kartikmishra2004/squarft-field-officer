@@ -22,6 +22,7 @@ import {
     addProjectMeeting,
     markProjectActivityDone,
     markProjectContacted,
+    rejectProjectLead,
     selectProjectById,
 } from "../../store/slices/projectsSlice";
 
@@ -38,6 +39,7 @@ const statusStyles = {
     meeting: { bg: "#F1EFFF", text: "#4A43EC" },
     interested: { bg: "#DCFCE7", text: "#16A34A" },
     live: { bg: "#DCFCE7", text: "#16A34A" },
+    rejected: { bg: "#FEE2E2", text: "#B91C1C" },
 };
 
 const followUpToneStyles = {
@@ -79,20 +81,49 @@ const projectJourneyTemplate = [
     "Interested",
     "Project live",
 ];
+const rejectedProjectJourneyTemplate = [
+    "New Lead Added",
+    "First Contact",
+    "Follow-up",
+    "Meeting Scheduled",
+    "Interested",
+    "Rejected",
+];
 const defaultProjectJourneyStage = "New Lead Added";
 
 function getProjectJourney(project) {
     const stage = project.journeyStage || defaultProjectJourneyStage;
-    const stageIndex = projectJourneyTemplate.findIndex((item) => item === stage);
-    const fallbackIndex = projectJourneyTemplate.findIndex((item) => item === defaultProjectJourneyStage);
-    const currentIndex = stageIndex >= 0 ? stageIndex : Math.max(0, fallbackIndex);
+    const isRejected = project.statusType === "rejected" || stage === "Rejected";
+    const template = isRejected ? rejectedProjectJourneyTemplate : projectJourneyTemplate;
     const stageHistory = project.stageHistory || [];
+    const completedRejectedIndex = isRejected
+        ? Math.max(
+              0,
+              ...stageHistory
+                  .filter((item) => item.stage !== "Rejected")
+                  .map((item) => template.findIndex((label) => label === item.stage))
+                  .filter((index) => index >= 0),
+          )
+        : -1;
+    const stageIndex = template.findIndex((item) => item === stage);
+    const fallbackIndex = template.findIndex((item) => item === defaultProjectJourneyStage);
+    const currentIndex = stageIndex >= 0 ? stageIndex : Math.max(0, fallbackIndex);
 
-    return projectJourneyTemplate.map((label, index) => ({
-        label,
-        note: stageHistory.find((item) => item.stage === label)?.note,
-        state: index < currentIndex ? "done" : index === currentIndex ? "current" : "upcoming",
-    }));
+    return template.map((label, index) => {
+        if (isRejected) {
+            return {
+                label,
+                note: stageHistory.find((item) => item.stage === label)?.note,
+                state: label === "Rejected" ? "rejectedCurrent" : index <= completedRejectedIndex ? "done" : "rejected",
+            };
+        }
+
+        return {
+            label,
+            note: stageHistory.find((item) => item.stage === label)?.note,
+            state: index < currentIndex ? "done" : index === currentIndex ? "current" : "upcoming",
+        };
+    });
 }
 
 async function openUrl(url) {
@@ -809,13 +840,16 @@ function ProjectJourney({ items }) {
             {items.map((item, index) => {
                 const isDone = item.state === "done";
                 const isCurrent = item.state === "current";
+                const isRejected = item.state === "rejected" || item.state === "rejectedCurrent";
                 const circleClass = isDone
                     ? "border-[#DCFCE7] bg-[#DCFCE7]"
+                    : isRejected
+                      ? "border-[#FEE2E2] bg-[#FEE2E2]"
                     : isCurrent
                       ? "border-[#4A43EC] bg-white"
                       : "border-[#E5E7EB] bg-white";
-                const iconName = isDone ? "checkmark" : isCurrent ? "time-outline" : "ellipse-outline";
-                const iconColor = isDone ? "#16A34A" : isCurrent ? "#4A43EC" : "#CBD5E1";
+                const iconName = isDone ? "checkmark" : isRejected ? "close" : isCurrent ? "time-outline" : "ellipse-outline";
+                const iconColor = isDone ? "#16A34A" : isRejected ? "#B91C1C" : isCurrent ? "#4A43EC" : "#CBD5E1";
 
                 return (
                     <View key={item.label} className="flex-row">
@@ -828,7 +862,13 @@ function ProjectJourney({ items }) {
                         <View className="ml-3 flex-1 pb-3">
                             <Text
                                 className={`text-[12px] font-lato-bold ${
-                                    isCurrent ? "text-[#4A43EC]" : item.state === "upcoming" ? "text-[#A1A1AA]" : "text-[#111827]"
+                                    isRejected
+                                        ? "text-[#B91C1C]"
+                                        : isCurrent
+                                          ? "text-[#4A43EC]"
+                                          : item.state === "upcoming"
+                                            ? "text-[#A1A1AA]"
+                                            : "text-[#111827]"
                                 }`}
                             >
                                 {item.label}
@@ -842,7 +882,7 @@ function ProjectJourney({ items }) {
     );
 }
 
-function Overview({ project }) {
+function Overview({ project, onReject }) {
     const typeStyle = typeStyles[project.type] ?? typeStyles.Warm;
     const hasCompletedFollowUp = (project.followUps || []).some((item) => item.isDone || item.status === "Done");
     const hasCompletedMeeting = (project.meetings || []).some((item) => item.isDone || item.status === "Done");
@@ -910,17 +950,27 @@ function Overview({ project }) {
                         ))}
                     </View>
                 ) : null}
-                <TouchableOpacity
-                    activeOpacity={canContinueOnboarding ? 0.85 : 1}
-                    disabled={!canContinueOnboarding}
-                    onPress={() => router.push({ pathname: "/onboarding/project-form", params: { projectId: project.id } })}
-                    className={`mt-3 h-10 items-center justify-center rounded-[10px] ${canContinueOnboarding ? "bg-[#4A43EC]" : "bg-[#CBD5E1]"}`}
-                >
-                    <Text className="text-[12px] font-lato-bold text-white">Continue Onboarding {">"}</Text>
-                </TouchableOpacity>
+                <View className="mt-3 flex-row" style={{ columnGap: 8 }}>
+                    <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => router.push({ pathname: "/onboarding/project-form", params: { projectId: project.id } })}
+                        className="h-10 flex-1 items-center justify-center rounded-[10px] bg-[#4A43EC]"
+                    >
+                        <Text className="text-[12px] font-lato-bold text-white">
+                            {canContinueOnboarding ? "Continue Onboarding >" : "Start onboarding"}
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={onReject}
+                        className="h-10 flex-1 items-center justify-center rounded-[10px] bg-[#FEE2E2]"
+                    >
+                        <Text className="text-[12px] font-lato-bold text-[#B91C1C]">Reject Lead</Text>
+                    </TouchableOpacity>
+                </View>
                 {!canContinueOnboarding ? (
                     <Text className="mt-2 text-center text-[10px] text-[#64748B]">
-                        (At least 1 meeting and 1 follow up required with done status)
+                        (At least 1 follow-up and 1 meeting is recommended but you can continue without them)
                     </Text>
                 ) : null}
             </Section>
@@ -1148,6 +1198,10 @@ export default function ProjectDetail() {
         [dispatch, projectId],
     );
 
+    const rejectLead = useCallback(() => {
+        dispatch(rejectProjectLead(projectId));
+    }, [dispatch, projectId]);
+
     if (!project) {
         return (
             <View className="flex-1 bg-white">
@@ -1260,7 +1314,7 @@ export default function ProjectDetail() {
 
                         <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 28 }} showsVerticalScrollIndicator={false}>
                             {activeTab === "overview" ? (
-                                <Overview project={project} />
+                                <Overview project={project} onReject={rejectLead} />
                             ) : (
                                 <Activity
                                     project={project}
