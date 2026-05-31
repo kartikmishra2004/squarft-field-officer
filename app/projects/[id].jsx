@@ -2,7 +2,7 @@ import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView, BottomShe
 import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { router, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Linking, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from "react-native";
@@ -747,7 +747,11 @@ function Overview({ project }) {
                         );
                     })}
                 </View>
-                <TouchableOpacity activeOpacity={0.85} className="mt-3 h-10 items-center justify-center rounded-[10px] bg-[#4A43EC]">
+                <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => router.push({ pathname: "/onboarding/project-form", params: { projectId: project.id } })}
+                    className="mt-3 h-10 items-center justify-center rounded-[10px] bg-[#4A43EC]"
+                >
                     <Text className="text-[12px] font-lato-bold text-white">Continue Onboarding {">"}</Text>
                 </TouchableOpacity>
             </Section>

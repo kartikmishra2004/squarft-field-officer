@@ -7,6 +7,9 @@ const projectsSlice = createSlice({
         items: initialProjects,
     },
     reducers: {
+        addProject: (state, action) => {
+            state.items.unshift(action.payload);
+        },
         addProjectFollowUp: (state, action) => {
             const { projectId, followUp } = action.payload;
             const project = state.items.find((item) => item.id === projectId);
@@ -34,7 +37,7 @@ const projectsSlice = createSlice({
     },
 });
 
-export const { addProjectFollowUp, addProjectMeeting } = projectsSlice.actions;
+export const { addProject, addProjectFollowUp, addProjectMeeting } = projectsSlice.actions;
 export const selectProjects = (state) => state.projects.items;
 export const selectProjectById = (state, projectId) => state.projects.items.find((project) => project.id === projectId);
 export const selectAllProjectFollowUps = (state) => state.projects.items.flatMap((project) => project.followUps);
