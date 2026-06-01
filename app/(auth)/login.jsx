@@ -1,21 +1,35 @@
-import { Text, View, TextInput, TouchableOpacity, Image } from "react-native";
+import { Text, View, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { Link, router } from "expo-router";
 import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Ionicons, AntDesign } from "@expo/vector-icons";
 import { setMobile, setPassword, toggleRememberMe, setLoggedIn } from "../../store/slices/authSlice";
+import { authAPI } from "../../services/api";
 const logo = require("../../assets/icons/app-icon.png");
 
 export default function Login() {
     const dispatch = useDispatch();
     const { mobile, password, rememberMe } = useSelector((state) => state.auth);
     const [showPassword, setShowPassword] = useState(false);
+    const [loading, setLoading] = useState(false);
 
-    const handleLogin = () => {
-       
-        dispatch(setLoggedIn(true));
-        router.replace("/(tabs)/home");
+    const handleLogin = async () => {
+        if (!mobile || !password) {
+            Alert.alert("Error", "Please enter mobile number and password");
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const response = await authAPI.login(mobile, password);
+            dispatch(setLoggedIn(true));
+            router.replace("/(tabs)/home");
+        } catch (error) {
+            Alert.alert("Login Failed", error.response?.data?.message || "Invalid credentials");
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -91,9 +105,14 @@ export default function Login() {
         
                 <TouchableOpacity
                     onPress={handleLogin}
+                    disabled={loading}
                     className="bg-[#4A43EC] rounded-2xl py-4 items-center mb-8"
                 >
-                    <Text className="text-white text-[16px] font-lato-bold">Log In</Text>
+                    {loading ? (
+                        <ActivityIndicator color="#fff" />
+                    ) : (
+                        <Text className="text-white text-[16px] font-lato-bold">Log In</Text>
+                    )}
                 </TouchableOpacity>
 
         

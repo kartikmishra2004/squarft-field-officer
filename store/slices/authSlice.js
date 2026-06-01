@@ -10,6 +10,8 @@ const authSlice = createSlice({
         confirmPassword: '',
         otp: ['', '', '', ''],
         otpFlow: 'register', 
+        otpToken: '',
+        verifiedToken: '',
         rememberMe: false,
         isLoggedIn: false,
     },
@@ -25,6 +27,8 @@ const authSlice = createSlice({
         },
         clearOtp: (state) => { state.otp = ['', '', '', '']; },
         setOtpFlow: (state, action) => { state.otpFlow = action.payload; },
+        setOtpToken: (state, action) => { state.otpToken = action.payload; },
+        setVerifiedToken: (state, action) => { state.verifiedToken = action.payload; },
         toggleRememberMe: (state) => { state.rememberMe = !state.rememberMe; },
         setLoggedIn: (state, action) => { state.isLoggedIn = action.payload; },
         logout: (state) => {
@@ -35,5 +39,5 @@ const authSlice = createSlice({
     },
 });
 
-export const { setName, setMobile, setPassword, setNewPassword, setConfirmPassword, setOtpDigit, clearOtp, setOtpFlow, toggleRememberMe, setLoggedIn, logout } = authSlice.actions;
+export const { setName, setMobile, setPassword, setNewPassword, setConfirmPassword, setOtpDigit, clearOtp, setOtpFlow, setOtpToken, setVerifiedToken, toggleRememberMe, setLoggedIn, logout } = authSlice.actions;
 export default authSlice.reducer;

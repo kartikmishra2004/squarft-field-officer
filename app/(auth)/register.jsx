@@ -1,10 +1,11 @@
-import { Text, View, TextInput, TouchableOpacity, Image } from "react-native";
+import { Text, View, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { Link, router } from "expo-router";
 import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Ionicons } from "@expo/vector-icons";
-import { setName, setMobile, setPassword, setConfirmPassword, setOtpFlow } from "../../store/slices/authSlice";
+import { setName, setMobile, setPassword, setConfirmPassword, setOtpFlow, setOtpToken } from "../../store/slices/authSlice";
+import { authAPI } from "../../services/api";
 
 const logo = require("../../assets/icons/app-icon.png");
 
@@ -12,10 +13,45 @@ export default function Register() {
     const dispatch = useDispatch();
     const { name, mobile, password, confirmPassword } = useSelector((state) => state.auth);
     const [showConfirm, setShowConfirm] = useState(false);
+    const [loading, setLoading] = useState(false);
 
-    const handleRegister = () => {
-        dispatch(setOtpFlow('register'));
-        router.push("/otp-verification");
+    const handleRegister = async () => {
+        if (!name || !mobile || !password || !confirmPassword) {
+            Alert.alert("Error", "Please fill all fields");
+            return;
+        }
+
+        if (password !== confirmPassword) {
+            Alert.alert("Error", "Passwords do not match");
+            return;
+        }
+
+        if (password.length < 8) {
+            Alert.alert("Error", "Password must be at least 8 characters");
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const [firstName, ...lastNameParts] = name.split(' ');
+            const lastName = lastNameParts.join(' ') || firstName;
+            await authAPI.register(mobile, password, firstName, lastName);
+            Alert.alert("Success", "Registration successful! Please login.", [
+                { text: "OK", onPress: () => router.replace("/login") }
+            ]);
+        } catch (error) {
+            console.log("Registration failed", {
+                response: error.response?.data,
+                status: error.response?.status,
+                message: error.message,
+            });
+            Alert.alert(
+                "Registration Failed",
+                error.response?.data?.message || error.message || "Unable to register"
+            );
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -100,9 +136,14 @@ export default function Register() {
 
                 <TouchableOpacity
                     onPress={handleRegister}
+                    disabled={loading}
                     className="bg-[#4A43EC] rounded-2xl py-4 items-center"
                 >
-                    <Text className="text-white text-[16px] font-semibold">Register</Text>
+                    {loading ? (
+                        <ActivityIndicator color="#fff" />
+                    ) : (
+                        <Text className="text-white text-[16px] font-semibold">Register</Text>
+                    )}
                 </TouchableOpacity>
 
             </View>

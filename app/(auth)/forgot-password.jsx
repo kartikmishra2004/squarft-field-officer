@@ -1,18 +1,35 @@
-import { Text, View, TextInput, TouchableOpacity, Image } from "react-native";
+import { Text, View, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { router } from "expo-router";
+import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { setMobile, setOtpFlow } from "../../store/slices/authSlice";
+import { setMobile, setOtpFlow, setOtpToken } from "../../store/slices/authSlice";
+import { authAPI } from "../../services/api";
 
 const logo = require("../../assets/icons/app-icon.png");
 
 export default function ForgotPassword() {
     const dispatch = useDispatch();
     const { mobile } = useSelector((state) => state.auth);
+    const [loading, setLoading] = useState(false);
 
-    const handleSendOtp = () => {
-        dispatch(setOtpFlow('forgot-password'));
-        router.push("/otp-verification");
+    const handleSendOtp = async () => {
+        if (!mobile) {
+            Alert.alert("Error", "Please enter mobile number");
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const response = await authAPI.sendOtp(mobile, 'reset_password');
+            dispatch(setOtpToken(response.otp_token));
+            dispatch(setOtpFlow('forgot-password'));
+            router.push("/otp-verification");
+        } catch (error) {
+            Alert.alert("Error", error.response?.data?.message || "Unable to send OTP");
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -45,9 +62,14 @@ export default function ForgotPassword() {
 
                 <TouchableOpacity
                     onPress={handleSendOtp}
+                    disabled={loading}
                     className="bg-[#4A43EC] rounded-2xl py-4 items-center"
                 >
-                    <Text className="text-white text-[16px] font-semibold">Send OTP</Text>
+                    {loading ? (
+                        <ActivityIndicator color="#fff" />
+                    ) : (
+                        <Text className="text-white text-[16px] font-semibold">Send OTP</Text>
+                    )}
                 </TouchableOpacity>
 
             </View>

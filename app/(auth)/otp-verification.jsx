@@ -1,16 +1,19 @@
-import { Text, View, TextInput, TouchableOpacity, Image } from "react-native";
+import { Text, View, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { router } from "expo-router";
-import { useRef } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { setOtpDigit, clearOtp, setLoggedIn } from "../../store/slices/authSlice";
+import { setOtpDigit, clearOtp, setLoggedIn, setVerifiedToken } from "../../store/slices/authSlice";
+import { authAPI } from "../../services/api";
 
 const logo = require("../../assets/icons/app-icon.png");
 
 export default function OtpVerification() {
     const dispatch = useDispatch();
-    const { otp, otpFlow } = useSelector((state) => state.auth);
+    const { otp, otpFlow, otpToken, mobile, password, name } = useSelector((state) => state.auth);
     const inputs = useRef([]);
+    const [loading, setLoading] = useState(false);
+    const [resending, setResending] = useState(false);
 
     const handleChange = (text, index) => {
         const digit = text.replace(/[^0-9]/g, '').slice(-1);
@@ -26,20 +29,49 @@ export default function OtpVerification() {
         }
     };
 
-    const handleVerify = () => {
-        dispatch(clearOtp());
-        if (otpFlow === 'forgot-password') {
-            router.push("/change-password");
-        } else {
-            dispatch(setLoggedIn(true));
-            router.replace("/(tabs)/home");
+    const handleVerify = async () => {
+        const otpCode = otp.join('');
+        if (otpCode.length !== 4) {
+            Alert.alert("Error", "Please enter complete OTP");
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const response = await authAPI.verifyOtp(otpToken, otpCode);
+            
+            if (otpFlow === 'forgot-password') {
+                dispatch(setVerifiedToken(response.verified_token));
+                router.push("/change-password");
+            } else if (otpFlow === 'register') {
+                const [firstName, ...lastNameParts] = name.split(' ');
+                const lastName = lastNameParts.join(' ') || firstName;
+                await authAPI.register(mobile, password, firstName, lastName);
+                dispatch(setLoggedIn(true));
+                router.replace("/(tabs)/home");
+            }
+            dispatch(clearOtp());
+        } catch (error) {
+            Alert.alert("Verification Failed", error.response?.data?.message || "Invalid OTP");
+        } finally {
+            setLoading(false);
         }
     };
 
-    const handleResend = () => {
-        dispatch(clearOtp());
-        inputs.current[0]?.focus();
-      
+    const handleResend = async () => {
+        setResending(true);
+        try {
+            const purpose = otpFlow === 'forgot-password' ? 'reset_password' : 'register';
+            const response = await authAPI.sendOtp(mobile, purpose);
+            dispatch(setOtpToken(response.otp_token));
+            dispatch(clearOtp());
+            inputs.current[0]?.focus();
+            Alert.alert("Success", "OTP sent successfully");
+        } catch (error) {
+            Alert.alert("Error", error.response?.data?.message || "Unable to resend OTP");
+        } finally {
+            setResending(false);
+        }
     };
 
     return (
@@ -82,15 +114,24 @@ export default function OtpVerification() {
 
                 <TouchableOpacity
                     onPress={handleVerify}
+                    disabled={loading}
                     className="bg-[#4A43EC] rounded-2xl py-4 items-center mb-6"
                 >
-                    <Text className="text-white text-[16px] font-semibold">Submit</Text>
+                    {loading ? (
+                        <ActivityIndicator color="#fff" />
+                    ) : (
+                        <Text className="text-white text-[16px] font-semibold">Submit</Text>
+                    )}
                 </TouchableOpacity>
 
                 <View className="flex-row justify-center items-center">
                     <Text className="text-gray-500 text-[14px]">Didn't get the OTP?  </Text>
-                    <TouchableOpacity onPress={handleResend}>
-                        <Text className="text-[#4A43EC] text-[14px] font-semibold">Resend OTP</Text>
+                    <TouchableOpacity onPress={handleResend} disabled={resending}>
+                        {resending ? (
+                            <ActivityIndicator size="small" color="#4A43EC" />
+                        ) : (
+                            <Text className="text-[#4A43EC] text-[14px] font-semibold">Resend OTP</Text>
+                        )}
                     </TouchableOpacity>
                 </View>
 
