@@ -33,9 +33,7 @@ export default function Register() {
 
         setLoading(true);
         try {
-            const [firstName, ...lastNameParts] = name.split(' ');
-            const lastName = lastNameParts.join(' ') || firstName;
-            await authAPI.register(mobile, password, firstName, lastName);
+            await authAPI.register(mobile, password, name);
             Alert.alert("Success", "Registration successful! Please login.", [
                 { text: "OK", onPress: () => router.replace("/login") }
             ]);

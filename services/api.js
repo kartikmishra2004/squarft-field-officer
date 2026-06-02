@@ -38,20 +38,19 @@ api.interceptors.response.use(
 
 export const authAPI = {
   login: async (phone, password) => {
-    const { data } = await api.post('/auth/login', { phone, password, role: 'sales_officer' });
+    const { data } = await api.post('/api/v1/field-officer/auth/login', { phone, password });
     if (data.token) {
       await AsyncStorage.setItem('authToken', data.token);
     }
     return data;
   },
 
-  register: async (phone, password, first_name, last_name) => {
-    const { data } = await api.post('/auth/register', {
+  register: async (phone, password, full_name, location) => {
+    const { data } = await api.post('/api/v1/field-officer/auth/register', {
       phone,
       password,
-      first_name,
-      last_name,
-      role: 'sales_officer',
+      full_name,
+      location: location || null,
     });
     return data;
   },
@@ -73,6 +72,27 @@ export const authAPI = {
 
   logout: async () => {
     await AsyncStorage.removeItem('authToken');
+  },
+};
+
+export const dashboardAPI = {
+  getDashboard: async () => {
+    const { data } = await api.get('/api/v1/field-officer/dashboard');
+    return data;
+  },
+};
+
+export const leadsAPI = {
+  createLead: async (payload) => {
+    const { data } = await api.post('/api/v1/field-officer/leads', payload);
+    return data;
+  },
+  getLeads: async ({ search, stage } = {}) => {
+    const params = {};
+    if (search) params.search = search;
+    if (stage && stage !== 'all') params.stage = stage;
+    const { data } = await api.get('/api/v1/field-officer/leads', { params });
+    return data;
   },
 };
 

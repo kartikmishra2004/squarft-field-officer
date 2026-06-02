@@ -28,6 +28,8 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch } from "react-redux";
 import { addProject } from "../store/slices/projectsSlice";
+import { fetchDashboard } from "../store/slices/dashboardSlice";
+import { leadsAPI } from "../services/api";
 
 const { width } = Dimensions.get("window");
 
@@ -143,6 +145,7 @@ function resetLeadForm() {
         fullAddress: "",
         builderNotes: "",
         followUpDate: "",
+        followUpISO: null,
     };
 }
 
@@ -354,6 +357,7 @@ function PriorityChip({ label, active, onPress }) {
 export default function ProjectLeadFormSheet({ visible, translateY, screenHeight, onClose }) {
     const dispatch = useDispatch();
     const [currentStep, setCurrentStep] = useState(0);
+    const [saving, setSaving] = useState(false);
     const scrollRef = useRef(null);
     const [form, setForm] = useState(resetLeadForm);
     const [category, setCategory] = useState("Residential");
@@ -422,9 +426,18 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
     const selectFollowUpTime = (timeOption) => {
         if (!selectedFollowUpDate) return;
 
+        // Parse the ISO date from selectedFollowUpDate.id and apply the selected time
+        const base = new Date(selectedFollowUpDate.id);
+        const [time, meridiem] = timeOption.split(' ');
+        let [hours, minutes] = time.split(':').map(Number);
+        if (meridiem === 'PM' && hours !== 12) hours += 12;
+        if (meridiem === 'AM' && hours === 12) hours = 0;
+        base.setHours(hours, minutes, 0, 0);
+
         setForm((current) => ({
             ...current,
             followUpDate: `${selectedFollowUpDate.value}, ${timeOption}`,
+            followUpISO: base.toISOString(),
         }));
         setFollowUpPickerOpen(false);
         setFollowUpPickerStep("date");
@@ -457,61 +470,100 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
         onClose();
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
         const now = new Date();
         const projectName = form.projectName.trim();
         const developerName = form.builderName.trim();
         const phoneNumber = form.mobile.trim();
-        const city = form.city.trim();
-        const area = form.area.trim();
 
         if (!projectName || !developerName || !phoneNumber) {
             Alert.alert("Missing details", "Project name, builder name, and mobile number are required.");
             return;
         }
 
-        dispatch(
-            addProject({
-                id: createProjectId(projectName),
-                projectName,
-                developerName,
-                contactPerson: form.contactPerson.trim(),
-                phoneNumber,
-                city,
-                location: area,
-                area,
-                colony: form.colony.trim(),
-                fullAddress: form.fullAddress.trim(),
-                category,
-                projectType: [category, projectType, subType].filter(Boolean).join(" . "),
-                type: priority,
-                status: "New Lead",
-                statusType: "newLead",
-                nextAction: "Call builder",
-                lastContact: "Not contacted",
-                addedOn: formatAddedDate(now),
-                createdAt: now.toISOString(),
-                leadStage,
-                interactionType,
-                builderNotes: form.builderNotes.trim(),
-                plannedFollowUpAt: form.followUpDate,
-                voiceNoteUri,
-                voiceNoteDuration,
-                journeyStage: "New Lead Added",
-                followUps: [],
-                meetings: [],
-            }),
-        );
-        setForm(resetLeadForm());
-        setCategory("Residential");
-        setProjectType("");
-        setSubType("");
-        setLeadStage("New Lead");
-        setInteractionType("Call");
-        setPriority("Hot");
-        setVoiceNoteUri(null);
-        setVoiceNoteDuration(0);
-        handleClose();
+        // Use pre-computed ISO string set during time selection
+        const scheduled_time = form.followUpISO || null;
+
+        const payload = {
+            project_name: projectName,
+            builder_name: developerName,
+            contact_person: form.contactPerson.trim() || null,
+            contact_number: phoneNumber,
+            property_category: category || null,
+            property_subtype: projectType || null,
+            configuration: subType || null,
+            city: form.city.trim() || null,
+            area: form.area.trim() || null,
+            colony_landmark: form.colony.trim() || null,
+            full_address: form.fullAddress.trim() || null,
+            stage: 'new_lead',
+            interaction_type: interactionType || null,
+            remarks: form.builderNotes.trim() || null,
+            scheduled_time,
+            lead_temperature: priority.toLowerCase(),
+            voice_note_url: voiceNoteUri || null,
+        };
+
+        try {
+            setSaving(true);
+            const response = await leadsAPI.createLead(payload);
+
+            // Optimistic local Redux update for instant UI
+            dispatch(
+                addProject({
+                    id: response.data?.id?.toString() || createProjectId(projectName),
+                    projectName,
+                    developerName,
+                    contactPerson: form.contactPerson.trim(),
+                    phoneNumber,
+                    city: form.city.trim(),
+                    location: form.area.trim(),
+                    area: form.area.trim(),
+                    colony: form.colony.trim(),
+                    fullAddress: form.fullAddress.trim(),
+                    category,
+                    projectType: [category, projectType, subType].filter(Boolean).join(" . "),
+                    type: priority,
+                    status: "New Lead",
+                    statusType: "newLead",
+                    nextAction: "Call builder",
+                    lastContact: "Not contacted",
+                    addedOn: formatAddedDate(now),
+                    createdAt: now.toISOString(),
+                    leadStage,
+                    interactionType,
+                    builderNotes: form.builderNotes.trim(),
+                    plannedFollowUpAt: form.followUpDate,
+                    voiceNoteUri,
+                    voiceNoteDuration,
+                    journeyStage: "New Lead Added",
+                    followUps: [],
+                    meetings: [],
+                }),
+            );
+
+            // Refresh dashboard metrics
+            dispatch(fetchDashboard());
+
+            // Reset form
+            setForm(resetLeadForm());
+            setCategory("Residential");
+            setProjectType("");
+            setSubType("");
+            setLeadStage("New Lead");
+            setInteractionType("Call");
+            setPriority("Hot");
+            setVoiceNoteUri(null);
+            setVoiceNoteDuration(0);
+            handleClose();
+        } catch (error) {
+            Alert.alert(
+                "Failed to save",
+                error.response?.data?.message || "Could not create lead. Please try again.",
+            );
+        } finally {
+            setSaving(false);
+        }
     };
 
     const startVoiceRecording = async () => {
@@ -1156,11 +1208,13 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 <TouchableOpacity
                                     activeOpacity={0.86}
                                     onPress={handleSave}
+                                    disabled={saving}
                                     className="flex-[2] flex-row items-center justify-center rounded-xl bg-[#4A43EC] py-4"
+                                    style={saving ? { opacity: 0.7 } : null}
                                 >
-                                    <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+                                    <Ionicons name={saving ? "hourglass-outline" : "checkmark"} size={18} color="#FFFFFF" />
                                     <Text className="ml-1 text-sm font-lato-bold text-white">
-                                        Save Lead
+                                        {saving ? "Saving..." : "Save Lead"}
                                     </Text>
                                 </TouchableOpacity>
                             </View>

@@ -44,9 +44,7 @@ export default function OtpVerification() {
                 dispatch(setVerifiedToken(response.verified_token));
                 router.push("/change-password");
             } else if (otpFlow === 'register') {
-                const [firstName, ...lastNameParts] = name.split(' ');
-                const lastName = lastNameParts.join(' ') || firstName;
-                await authAPI.register(mobile, password, firstName, lastName);
+                await authAPI.register(mobile, password, name);
                 dispatch(setLoggedIn(true));
                 router.replace("/(tabs)/home");
             }

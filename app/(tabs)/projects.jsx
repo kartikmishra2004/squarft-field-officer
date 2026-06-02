@@ -1,57 +1,122 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useMemo, useState } from "react";
-import { Linking, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Linking, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useDispatch, useSelector } from "react-redux";
+import { useDispatch } from "react-redux";
 import { projectFilters } from "../../data/projectsData";
-import { markProjectContacted, selectProjects } from "../../store/slices/projectsSlice";
+import { leadsAPI } from "../../services/api";
+import { markProjectContacted } from "../../store/slices/projectsSlice";
 
-const typeStyles = {
-    Hot: { bg: "#FEE2E2", text: "#B91C1C" },
-    Warm: { bg: "#FFEDD5", text: "#C2410C" },
-    Cold: { bg: "#DBEAFE", text: "#2563EB" },
+// Map UI filter keys → backend stage values
+const stageMap = {
+    all: "all",
+    newLead: "new_lead",
+    contacted: "first_contact",
+    followUp: "follow_up",
+    meeting: "meeting_scheduled",
+    interested: "interested",
+    live: "project_live",
+    rejected: "rejected",
 };
 
-const statusStyles = {
-    newLead: { bg: "#E0F2FE", text: "#0369A1" },
-    contacted: { bg: "#E0F2FE", text: "#0369A1" },
-    followUp: { bg: "#FFF7ED", text: "#EA580C" },
-    meeting: { bg: "#F1EFFF", text: "#4A43EC" },
-    interested: { bg: "#DCFCE7", text: "#16A34A" },
-    live: { bg: "#DCFCE7", text: "#16A34A" },
-    rejected: { bg: "#FEE2E2", text: "#B91C1C" },
+// Map backend stage → UI display label + style
+const stageStyles = {
+    new_lead:           { label: "New Lead",   bg: "#E0F2FE", text: "#0369A1" },
+    first_contact:      { label: "Contacted",  bg: "#E0F2FE", text: "#0369A1" },
+    follow_up:          { label: "Follow Up",  bg: "#FFF7ED", text: "#EA580C" },
+    meeting_scheduled:  { label: "Meeting",    bg: "#F1EFFF", text: "#4A43EC" },
+    interested:         { label: "Interested", bg: "#DCFCE7", text: "#16A34A" },
+    project_live:       { label: "Live",       bg: "#DCFCE7", text: "#16A34A" },
+    rejected:           { label: "Rejected",   bg: "#FEE2E2", text: "#B91C1C" },
+};
+
+const tempStyles = {
+    hot:  { bg: "#FEE2E2", text: "#B91C1C" },
+    warm: { bg: "#FFEDD5", text: "#C2410C" },
+    cold: { bg: "#DBEAFE", text: "#2563EB" },
 };
 
 function openUrl(url) {
     Linking.openURL(url).catch(() => {});
 }
 
+function CardSkeleton() {
+    return (
+        <View className="mb-2.5 rounded-[12px] border border-[#E5E7EB] bg-white p-2.5">
+            <View className="flex-row items-start justify-between">
+                <View className="flex-1 mr-3">
+                    <View className="h-4 w-[55%] rounded bg-gray-200 mb-2" />
+                    <View className="h-3 w-[40%] rounded bg-gray-100" />
+                </View>
+                <View className="h-5 w-16 rounded-full bg-gray-100" />
+            </View>
+            <View className="mt-2.5 h-12 rounded-[10px] bg-gray-100" />
+            <View className="mt-2.5 flex-row justify-between items-center">
+                <View className="h-3 w-28 rounded bg-gray-100" />
+                <View className="flex-row">
+                    <View className="h-7 w-7 rounded-[8px] bg-gray-100 mr-2" />
+                    <View className="h-7 w-14 rounded-[8px] bg-gray-200" />
+                </View>
+            </View>
+        </View>
+    );
+}
+
 export default function Projects() {
     const router = useRouter();
     const dispatch = useDispatch();
-    const projects = useSelector(selectProjects);
     const [activeFilter, setActiveFilter] = useState("all");
     const [query, setQuery] = useState("");
+    const [leads, setLeads] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const debounceRef = useRef(null);
 
-    const filteredProjects = useMemo(() => {
-        const searchText = query.trim().toLowerCase();
+    const fetchLeads = useCallback(async (search, filter, silent = false) => {
+        if (!silent) setLoading(true);
+        else setRefreshing(true);
+        try {
+            const stage = stageMap[filter] || "all";
+            const res = await leadsAPI.getLeads({ search: search.trim() || undefined, stage });
+            setLeads(res.data || []);
+        } catch (err) {
+            console.log("Fetch leads error", err?.response?.data || err.message);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    }, []);
 
-        return projects.filter((project) => {
-            const matchesFilter = activeFilter === "all" || project.statusType === activeFilter;
-            const matchesSearch = !searchText || project.projectName?.toLowerCase().includes(searchText);
+    // Initial load
+    useEffect(() => {
+        fetchLeads(query, activeFilter);
+    }, []);
 
-            return matchesFilter && matchesSearch;
-        });
-    }, [activeFilter, projects, query]);
+    // Re-fetch on filter change immediately
+    useEffect(() => {
+        fetchLeads(query, activeFilter);
+    }, [activeFilter]);
+
+    // Debounce search input by 400ms
+    useEffect(() => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => {
+            fetchLeads(query, activeFilter);
+        }, 400);
+        return () => clearTimeout(debounceRef.current);
+    }, [query]);
 
     return (
         <View className="flex-1 bg-white">
             <StatusBar style="dark" />
             <SafeAreaView className="flex-1" edges={["top"]}>
                 <View className="px-4 pb-2 pt-1">
-                    <Text className="text-[20px] font-lato-bold text-[#0F172A]">Projects</Text>
+                    <View className="flex-row items-center justify-between">
+                        <Text className="text-[20px] font-lato-bold text-[#0F172A]">Projects</Text>
+                        {refreshing && <ActivityIndicator size="small" color="#4A43EC" />}
+                    </View>
 
                     <View className="mt-3 h-11 flex-row items-center rounded-[12px] border border-[#E5E7EB] bg-white px-3">
                         <Ionicons name="search-outline" size={17} color="#8A94A6" />
@@ -79,7 +144,9 @@ export default function Projects() {
                     >
                         {projectFilters.map((filter) => {
                             const isActive = activeFilter === filter.key;
-                            const label = filter.key === "all" ? `${filter.label} (${projects.length})` : filter.label;
+                            const label = filter.key === "all"
+                                ? `${filter.label} (${leads.length})`
+                                : filter.label;
 
                             return (
                                 <TouchableOpacity
@@ -90,11 +157,7 @@ export default function Projects() {
                                         isActive ? "border-[#4A43EC] bg-[#4A43EC]" : "border-[#E2E8F0] bg-white"
                                     }`}
                                 >
-                                    <Text
-                                        className={`text-[11px] font-lato-bold ${
-                                            isActive ? "text-white" : "text-[#475569]"
-                                        }`}
-                                    >
+                                    <Text className={`text-[11px] font-lato-bold ${isActive ? "text-white" : "text-[#475569]"}`}>
                                         {label}
                                     </Text>
                                 </TouchableOpacity>
@@ -109,87 +172,93 @@ export default function Projects() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                 >
-                    {filteredProjects.map((project) => {
-                        const typeStyle = typeStyles[project.type] ?? typeStyles.Warm;
-                        const statusStyle = statusStyles[project.statusType] ?? statusStyles.followUp;
-
-                        return (
-                            <View
-                                key={project.id}
-                                className="mb-2.5 rounded-[12px] border border-[#E5E7EB] bg-white p-2.5"
-                            >
-                                <View className="flex-row items-start justify-between">
-                                    <View className="mr-3 flex-1">
-                                        <View className="flex-row items-center">
-                                            <Text
-                                                className="mr-2 flex-shrink text-[14px] font-lato-bold text-[#0F172A]"
-                                                numberOfLines={1}
-                                            >
-                                                {project.projectName}
-                                            </Text>
-                                            <View
-                                                className="rounded-full px-1.5 py-0.5"
-                                                style={{ backgroundColor: typeStyle.bg }}
-                                            >
-                                                <Text className="text-[9px] font-semibold" style={{ color: typeStyle.text }}>
-                                                    {project.type}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        {[project.developerName, project.location || project.city].filter(Boolean).length ? (
-                                            <Text className="mt-0.5 text-[11px] text-[#64748B]" numberOfLines={1}>
-                                                {[project.developerName, project.location || project.city].filter(Boolean).join(" . ")}
-                                            </Text>
-                                        ) : null}
-                                    </View>
-
-                                    <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: statusStyle.bg }}>
-                                        <Text className="text-[9px] font-lato-bold" style={{ color: statusStyle.text }}>
-                                            {project.status}
-                                        </Text>
-                                    </View>
-                                </View>
-
-                                <View className="mt-2.5 rounded-[10px] bg-[#F8F9FF] px-2.5 py-2">
-                                    <Text className="text-[9px] text-[#64748B]">Next action</Text>
-                                    <Text className="mt-0.5 text-[12px] font-semibold text-[#111827]">
-                                        {project.nextAction || "No next action"}
-                                    </Text>
-                                </View>
-
-                                <View className="mt-2.5 flex-row items-center justify-between">
-                                    <Text className="text-[10px] text-[#94A3B8]">Last contact: {project.lastContact || "Not contacted"}</Text>
-
-                                    <View className="flex-row items-center">
-                                        <TouchableOpacity
-                                            activeOpacity={0.8}
-                                            onPress={() => {
-                                                dispatch(markProjectContacted(project.id));
-                                                openUrl(`tel:${project.phoneNumber}`);
-                                            }}
-                                            className="mr-2 h-7 w-7 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC]"
-                                        >
-                                            <Ionicons name="call-outline" size={13} color="#475569" />
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            activeOpacity={0.85}
-                                            onPress={() => router.push(`/projects/${project.id}`)}
-                                            className="h-7 items-center justify-center rounded-[8px] bg-[#4A43EC] px-3.5"
-                                        >
-                                            <Text className="text-[11px] font-lato-bold text-white">View</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-                            </View>
-                        );
-                    })}
-
-                    {!filteredProjects.length ? (
+                    {loading ? (
+                        <>
+                            <CardSkeleton />
+                            <CardSkeleton />
+                            <CardSkeleton />
+                            <CardSkeleton />
+                        </>
+                    ) : leads.length === 0 ? (
                         <View className="mt-16 items-center">
                             <Ionicons name="search-outline" size={32} color="#CBD5E1" />
                             <Text className="mt-3 text-[14px] font-lato-bold text-[#64748B]">No projects found</Text>
                         </View>
-                    ) : null}
+                    ) : (
+                        leads.map((lead) => {
+                            const stageStyle = stageStyles[lead.stage] ?? stageStyles.new_lead;
+                            const tempStyle = tempStyles[lead.lead_temperature] ?? tempStyles.warm;
+
+                            return (
+                                <View
+                                    key={lead.id}
+                                    className="mb-2.5 rounded-[12px] border border-[#E5E7EB] bg-white p-2.5"
+                                >
+                                    <View className="flex-row items-start justify-between">
+                                        <View className="mr-3 flex-1">
+                                            <View className="flex-row items-center">
+                                                <Text
+                                                    className="mr-2 flex-shrink text-[14px] font-lato-bold text-[#0F172A]"
+                                                    numberOfLines={1}
+                                                >
+                                                    {lead.project_name}
+                                                </Text>
+                                                <View className="rounded-full px-1.5 py-0.5" style={{ backgroundColor: tempStyle.bg }}>
+                                                    <Text className="text-[9px] font-semibold" style={{ color: tempStyle.text }}>
+                                                        {lead.lead_temperature
+                                                            ? lead.lead_temperature.charAt(0).toUpperCase() + lead.lead_temperature.slice(1)
+                                                            : "Warm"}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                            {[lead.builder_name, lead.location].filter(Boolean).length ? (
+                                                <Text className="mt-0.5 text-[11px] text-[#64748B]" numberOfLines={1}>
+                                                    {[lead.builder_name, lead.location].filter(Boolean).join(" . ")}
+                                                </Text>
+                                            ) : null}
+                                        </View>
+                                        <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: stageStyle.bg }}>
+                                            <Text className="text-[9px] font-lato-bold" style={{ color: stageStyle.text }}>
+                                                {stageStyle.label}
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    <View className="mt-2.5 rounded-[10px] bg-[#F8F9FF] px-2.5 py-2">
+                                        <Text className="text-[9px] text-[#64748B]">Next action</Text>
+                                        <Text className="mt-0.5 text-[12px] font-semibold text-[#111827]">
+                                            {lead.next_action || "No next action"}
+                                        </Text>
+                                    </View>
+
+                                    <View className="mt-2.5 flex-row items-center justify-between">
+                                        <Text className="text-[10px] text-[#94A3B8]">
+                                            Updated: {new Date(lead.updated_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                                        </Text>
+                                        <View className="flex-row items-center">
+                                            <TouchableOpacity
+                                                activeOpacity={0.8}
+                                                onPress={() => {
+                                                    dispatch(markProjectContacted(lead.id));
+                                                    openUrl(`tel:${lead.contact_number}`);
+                                                }}
+                                                className="mr-2 h-7 w-7 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC]"
+                                            >
+                                                <Ionicons name="call-outline" size={13} color="#475569" />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                activeOpacity={0.85}
+                                                onPress={() => router.push(`/projects/${lead.id}`)}
+                                                className="h-7 items-center justify-center rounded-[8px] bg-[#4A43EC] px-3.5"
+                                            >
+                                                <Text className="text-[11px] font-lato-bold text-white">View</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                </View>
+                            );
+                        })
+                    )}
                 </ScrollView>
             </SafeAreaView>
         </View>
