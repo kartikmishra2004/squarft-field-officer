@@ -1143,7 +1143,7 @@ function Activity({ project, activeActivityTab, onActivityTabChange, onActivityD
 
 export default function ProjectDetail() {
     const router = useRouter();
-    const { id } = useLocalSearchParams();
+    const { id, leadData } = useLocalSearchParams();
     const projectId = Array.isArray(id) ? id[0] : id;
     const dispatch = useDispatch();
     const [activeTab, setActiveTab] = useState("overview");
@@ -1151,7 +1151,63 @@ export default function ProjectDetail() {
     const [activeSheet, setActiveSheet] = useState("followUp");
     const bottomSheetRef = useRef(null);
     const sheetSnapPoints = useMemo(() => ["86%"], []);
-    const project = useSelector((state) => selectProjectById(state, projectId));
+    const reduxProject = useSelector((state) => selectProjectById(state, projectId));
+
+    // Normalize API lead shape → internal project shape
+    const normalizeApiLead = (d) => ({
+        id: d.id,
+        projectName: d.project_name || d.projectName || "",
+        developerName: d.builder_name || d.developerName || "",
+        contactPerson: d.contact_person || "",
+        phoneNumber: d.contact_number || d.phoneNumber || "",
+        city: d.city || "",
+        location: d.area || d.location || "",
+        area: d.area || "",
+        colony: d.colony_landmark || "",
+        fullAddress: d.full_address || "",
+        category: d.property_category || "",
+        projectType: [d.property_category, d.property_subtype, d.configuration].filter(Boolean).join(" . "),
+        type: d.lead_temperature
+            ? d.lead_temperature.charAt(0).toUpperCase() + d.lead_temperature.slice(1)
+            : "Warm",
+        status: d.stage ? d.stage.replace(/_/g, " ") : "New Lead",
+        statusType: d.stage || "new_lead",
+        nextAction: d.next_action || d.remarks || "",
+        lastContact: d.updated_at
+            ? new Date(d.updated_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+            : "Not contacted",
+        addedOn: d.created_at
+            ? new Date(d.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+            : "",
+        builderNotes: d.remarks || "",
+        journeyStage: d.stage || "new_lead",
+        onboardingProgress: d.onboarding_progress || 0,
+        stageHistory: [],
+        followUps: [],
+        meetings: [],
+        onboardingData: null,
+        onboardingDraft: null,
+    });
+
+    const [apiProject, setApiProject] = useState(() => {
+        if (leadData) {
+            try { return normalizeApiLead(JSON.parse(leadData)); } catch { return null; }
+        }
+        return null;
+    });
+    const [apiLoading, setApiLoading] = useState(!reduxProject && !leadData);
+
+    useEffect(() => {
+        if (!reduxProject && !leadData) {
+            setApiLoading(true);
+            leadsAPI.getLeadById(projectId)
+                .then((res) => setApiProject(normalizeApiLead(res.data)))
+                .catch(() => setApiProject(null))
+                .finally(() => setApiLoading(false));
+        }
+    }, [projectId, reduxProject, leadData]);
+
+    const project = reduxProject || apiProject;
     const renderBackdrop = useCallback(
         (props) => <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.35} />,
         [],
@@ -1206,10 +1262,16 @@ export default function ProjectDetail() {
         return (
             <View className="flex-1 bg-white">
                 <SafeAreaView className="flex-1 items-center justify-center px-6">
-                    <Text className="text-[18px] font-lato-bold text-[#111827]">Project not found</Text>
-                    <TouchableOpacity onPress={() => router.back()} className="mt-4 h-10 justify-center rounded-[10px] bg-[#4A43EC] px-5">
-                        <Text className="font-lato-bold text-white">Go Back</Text>
-                    </TouchableOpacity>
+                    {apiLoading ? (
+                        <ActivityIndicator size="large" color="#4A43EC" />
+                    ) : (
+                        <>
+                            <Text className="text-[18px] font-lato-bold text-[#111827]">Project not found</Text>
+                            <TouchableOpacity onPress={() => router.back()} className="mt-4 h-10 justify-center rounded-[10px] bg-[#4A43EC] px-5">
+                                <Text className="font-lato-bold text-white">Go Back</Text>
+                            </TouchableOpacity>
+                        </>
+                    )}
                 </SafeAreaView>
             </View>
         );

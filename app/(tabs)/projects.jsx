@@ -248,7 +248,10 @@ export default function Projects() {
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
-                                                onPress={() => router.push(`/projects/${lead.id}`)}
+                                                onPress={() => router.push({
+                                                    pathname: `/projects/${lead.id}`,
+                                                    params: { leadData: JSON.stringify(lead) }
+                                                })}
                                                 className="h-7 items-center justify-center rounded-[8px] bg-[#4A43EC] px-3.5"
                                             >
                                                 <Text className="text-[11px] font-lato-bold text-white">View</Text>
