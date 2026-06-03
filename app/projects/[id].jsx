@@ -14,7 +14,7 @@ import * as ImagePicker from "expo-image-picker";
 import { router, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Linking, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 import {
@@ -25,6 +25,7 @@ import {
     rejectProjectLead,
     selectProjectById,
 } from "../../store/slices/projectsSlice";
+import { leadsAPI } from "../../services/api";
 
 const typeStyles = {
     Hot: { bg: "#FEE2E2", text: "#B91C1C" },
@@ -1141,6 +1142,17 @@ function Activity({ project, activeActivityTab, onActivityTabChange, onActivityD
     );
 }
 
+// Map backend snake_case stage → display label used by getProjectJourney
+const stageDisplayMap = {
+    new_lead: "New Lead Added",
+    first_contact: "First Contact",
+    follow_up: "Follow-up",
+    meeting_scheduled: "Meeting Scheduled",
+    interested: "Interested",
+    project_live: "Project live",
+    rejected: "Rejected",
+};
+
 export default function ProjectDetail() {
     const router = useRouter();
     const { id, leadData } = useLocalSearchParams();
@@ -1154,40 +1166,48 @@ export default function ProjectDetail() {
     const reduxProject = useSelector((state) => selectProjectById(state, projectId));
 
     // Normalize API lead shape → internal project shape
-    const normalizeApiLead = (d) => ({
-        id: d.id,
-        projectName: d.project_name || d.projectName || "",
-        developerName: d.builder_name || d.developerName || "",
-        contactPerson: d.contact_person || "",
-        phoneNumber: d.contact_number || d.phoneNumber || "",
-        city: d.city || "",
-        location: d.area || d.location || "",
-        area: d.area || "",
-        colony: d.colony_landmark || "",
-        fullAddress: d.full_address || "",
-        category: d.property_category || "",
-        projectType: [d.property_category, d.property_subtype, d.configuration].filter(Boolean).join(" . "),
-        type: d.lead_temperature
-            ? d.lead_temperature.charAt(0).toUpperCase() + d.lead_temperature.slice(1)
-            : "Warm",
-        status: d.stage ? d.stage.replace(/_/g, " ") : "New Lead",
-        statusType: d.stage || "new_lead",
-        nextAction: d.next_action || d.remarks || "",
-        lastContact: d.updated_at
-            ? new Date(d.updated_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
-            : "Not contacted",
-        addedOn: d.created_at
-            ? new Date(d.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-            : "",
-        builderNotes: d.remarks || "",
-        journeyStage: d.stage || "new_lead",
-        onboardingProgress: d.onboarding_progress || 0,
-        stageHistory: [],
-        followUps: [],
-        meetings: [],
-        onboardingData: null,
-        onboardingDraft: null,
-    });
+    const normalizeApiLead = (d, timeline = []) => {
+        const displayStage = stageDisplayMap[d.stage] || "New Lead Added";
+        const stageHistory = timeline.map((t) => ({
+            stage: stageDisplayMap[t.stage] || t.stage,
+            note: t.description || t.title || "",
+            at: t.created_at,
+        }));
+        return {
+            id: d.id,
+            projectName: d.project_name || d.projectName || "",
+            developerName: d.builder_name || d.developerName || "",
+            contactPerson: d.contact_person || "",
+            phoneNumber: d.contact_number || d.phoneNumber || "",
+            city: d.city || "",
+            location: d.area || d.location || "",
+            area: d.area || "",
+            colony: d.colony_landmark || "",
+            fullAddress: d.full_address || "",
+            category: d.property_category || "",
+            projectType: [d.property_category, d.property_subtype, d.configuration].filter(Boolean).join(" . "),
+            type: d.lead_temperature
+                ? d.lead_temperature.charAt(0).toUpperCase() + d.lead_temperature.slice(1)
+                : "Warm",
+            status: d.stage ? d.stage.replace(/_/g, " ") : "New Lead",
+            statusType: d.stage || "new_lead",
+            nextAction: d.next_action || d.remarks || "",
+            lastContact: d.updated_at
+                ? new Date(d.updated_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+                : "Not contacted",
+            addedOn: d.created_at
+                ? new Date(d.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                : "",
+            builderNotes: d.remarks || "",
+            journeyStage: displayStage,
+            onboardingProgress: d.onboarding_progress || 0,
+            stageHistory,
+            followUps: [],
+            meetings: [],
+            onboardingData: null,
+            onboardingDraft: null,
+        };
+    };
 
     const [apiProject, setApiProject] = useState(() => {
         if (leadData) {
@@ -1206,6 +1226,27 @@ export default function ProjectDetail() {
                 .finally(() => setApiLoading(false));
         }
     }, [projectId, reduxProject, leadData]);
+
+    // Fetch timeline for API leads to populate journey stages
+    useEffect(() => {
+        if (!reduxProject && projectId) {
+            leadsAPI.getLeadTimeline(projectId)
+                .then((res) => {
+                    const timeline = res.data || [];
+                    setApiProject((prev) => {
+                        if (!prev) return prev;
+                        const displayStage = stageDisplayMap[prev.statusType] || "New Lead Added";
+                        const stageHistory = timeline.map((t) => ({
+                            stage: stageDisplayMap[t.stage] || t.stage,
+                            note: t.description || t.title || "",
+                            at: t.created_at,
+                        }));
+                        return { ...prev, journeyStage: displayStage, stageHistory };
+                    });
+                })
+                .catch(() => {}); // timeline is non-critical, silent fail
+        }
+    }, [projectId, reduxProject]);
 
     const project = reduxProject || apiProject;
     const renderBackdrop = useCallback(

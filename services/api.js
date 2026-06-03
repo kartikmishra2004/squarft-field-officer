@@ -94,6 +94,14 @@ export const leadsAPI = {
     const { data } = await api.get('/api/v1/field-officer/leads', { params });
     return data;
   },
+  getLeadById: async (id) => {
+    const { data } = await api.get(`/api/v1/field-officer/leads/${id}`);
+    return data;
+  },
+  getLeadTimeline: async (id) => {
+    const { data } = await api.get(`/api/v1/field-officer/leads/${id}/timeline`);
+    return data;
+  },
 };
 
 export default api;
