@@ -1,11 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Image, Linking, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { useEffect } from "react";
+import { ActivityIndicator, Alert, Image, Linking, RefreshControl, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useDispatch } from "react-redux";
-import { officerProfile, performanceStats, profileLinks } from "../../data/profileData";
+import { useDispatch, useSelector } from "react-redux";
+import { profileLinks } from "../../data/profileData";
+import { authAPI } from "../../services/api";
 import { logout } from "../../store/slices/authSlice";
+import { clearOfficerProfile, fetchOfficerProfile } from "../../store/slices/profileSlice";
 
 const profileImage = require("../../assets/images/profile-officer.png");
 
@@ -14,8 +17,33 @@ const statToneStyles = {
     success: { bg: "#DCFCE7", text: "#16A34A" },
 };
 
-function openUrl(url) {
-    Linking.openURL(url).catch(() => {});
+const statConfig = [
+    { key: "total_leads", label: "Total Leads", tone: "primary" },
+    { key: "meetings_done", label: "Meetings Done", tone: "success" },
+    { key: "onboarded", label: "Onboarded", tone: "primary" },
+    { key: "projects_live", label: "Projects Live", tone: "success" },
+];
+
+function getInitials(name) {
+    return (name || "FO")
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase())
+        .join("") || "FO";
+}
+
+async function openUrl(url, fallbackMessage = "Unable to open this link.") {
+    try {
+        const supported = await Linking.canOpenURL(url);
+        if (!supported) {
+            Alert.alert("Unavailable", fallbackMessage);
+            return;
+        }
+        await Linking.openURL(url);
+    } catch {
+        Alert.alert("Unavailable", fallbackMessage);
+    }
 }
 
 function Section({ title, children }) {
@@ -29,13 +57,75 @@ function Section({ title, children }) {
     );
 }
 
+function ErrorBanner({ message, onRetry, loading }) {
+    return (
+        <View className="mb-3 rounded-[12px] border border-[#FECACA] bg-[#FEF2F2] p-3">
+            <View className="flex-row items-start">
+                <Ionicons name="alert-circle-outline" size={18} color="#DC2626" />
+                <View className="ml-2 flex-1">
+                    <Text className="text-[12px] font-lato-bold text-[#991B1B]">Profile could not be refreshed</Text>
+                    <Text className="mt-1 text-[11px] leading-4 text-[#B91C1C]">{message}</Text>
+                </View>
+            </View>
+            <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={onRetry}
+                disabled={loading}
+                className="mt-2 h-8 flex-row items-center justify-center rounded-[8px] bg-[#DC2626]"
+            >
+                {loading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                    <>
+                        <Ionicons name="refresh" size={13} color="#fff" />
+                        <Text className="ml-1.5 text-[11px] font-lato-bold text-white">Retry</Text>
+                    </>
+                )}
+            </TouchableOpacity>
+        </View>
+    );
+}
+
 export default function Profile() {
     const dispatch = useDispatch();
+    const { profile, performanceThisMonth, reportingManager, loading, error } = useSelector((state) => state.profile);
 
-    const handleLogout = () => {
-        dispatch(logout());
-        router.replace("/(auth)/login");
+    useEffect(() => {
+        dispatch(fetchOfficerProfile());
+    }, [dispatch]);
+
+    const handleLogout = async () => {
+        try {
+            await authAPI.logout();
+        } finally {
+            dispatch(clearOfficerProfile());
+            dispatch(logout());
+            router.replace("/(auth)/login");
+        }
     };
+
+    const handleRetry = () => {
+        dispatch(fetchOfficerProfile());
+    };
+
+    const handleCallManager = () => {
+        if (!reportingManager?.phone) {
+            Alert.alert("Phone unavailable", "No reporting manager phone number is available.");
+            return;
+        }
+        openUrl(`tel:${reportingManager.phone}`, "Unable to call this number.");
+    };
+
+    const stats = statConfig.map((stat) => ({
+        ...stat,
+        value: performanceThisMonth?.[stat.key] ?? 0,
+    }));
+
+    const profileName = profile?.name || "Field Officer";
+    const roleDisplay = profile?.role_display || "Field Officer";
+    const managerName = reportingManager?.name || "Not assigned";
+    const managerRole = reportingManager?.role_display || "Reporting Manager";
+    const managerMeta = [managerRole, reportingManager?.location].filter(Boolean).join(" - ");
 
     return (
         <View className="flex-1 bg-white">
@@ -44,15 +134,23 @@ export default function Profile() {
                 <View className="bg-[#4A43EC] px-4 pb-7 pt-3">
                     <View className="flex-row items-center">
                         <View className="h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-white">
-                            <Image source={profileImage} className="h-12 w-12" resizeMode="cover" />
+                            <Image
+                                source={profile?.avatar_url ? { uri: profile.avatar_url } : profileImage}
+                                className="h-12 w-12"
+                                resizeMode="cover"
+                            />
                         </View>
                         <View className="ml-3 flex-1">
                             <View className="flex-row items-center">
-                                <Text className="text-[18px] font-lato-bold text-white">{officerProfile.name}</Text>
-                                <Ionicons name="checkmark-circle" size={14} color="#10F528" style={{ marginLeft: 5 }} />
+                                <Text className="text-[18px] font-lato-bold text-white" numberOfLines={1}>
+                                    {profileName}
+                                </Text>
+                                {profile?.is_verified && (
+                                    <Ionicons name="checkmark-circle" size={14} color="#10F528" style={{ marginLeft: 5 }} />
+                                )}
                             </View>
                             <Text className="mt-1 text-[12px] text-white/80">
-                                {officerProfile.area} - {officerProfile.zone}
+                                {roleDisplay}
                             </Text>
                         </View>
                     </View>
@@ -61,11 +159,28 @@ export default function Profile() {
                 <ScrollView
                     className="-mt-4 flex-1 rounded-t-[18px] bg-white px-4 pt-4"
                     contentContainerStyle={{ paddingBottom: 96 }}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={loading && Boolean(profile)}
+                            onRefresh={handleRetry}
+                            tintColor="#4A43EC"
+                            colors={["#4A43EC"]}
+                        />
+                    }
                     showsVerticalScrollIndicator={false}
                 >
+                    {loading && !profile ? (
+                        <View className="mb-3 h-10 flex-row items-center justify-center rounded-[10px] bg-[#F8F9FF]">
+                            <ActivityIndicator size="small" color="#4A43EC" />
+                            <Text className="ml-2 text-[12px] font-lato-bold text-[#4A43EC]">Loading profile</Text>
+                        </View>
+                    ) : null}
+
+                    {error ? <ErrorBanner message={error} onRetry={handleRetry} loading={loading} /> : null}
+
                     <Section title="Performance This Month">
                         <View className="flex-row flex-wrap justify-between">
-                            {performanceStats.map((stat) => {
+                            {stats.map((stat) => {
                                 const tone = statToneStyles[stat.tone] ?? statToneStyles.primary;
 
                                 return (
@@ -88,19 +203,21 @@ export default function Profile() {
                         <View className="flex-row items-center">
                             <View className="h-10 w-10 items-center justify-center rounded-full bg-[#F1EFFF]">
                                 <Text className="text-[11px] font-lato-bold text-[#4A43EC]">
-                                    {officerProfile.manager.initials}
+                                    {getInitials(managerName)}
                                 </Text>
                             </View>
                             <View className="ml-3 flex-1">
                                 <Text className="text-[13px] font-lato-bold text-[#111827]">
-                                    {officerProfile.manager.name}
+                                    {managerName}
                                 </Text>
-                                <Text className="mt-0.5 text-[10px] text-[#64748B]">{officerProfile.manager.role}</Text>
+                                <Text className="mt-0.5 text-[10px] text-[#64748B]">{managerMeta}</Text>
                             </View>
                             <TouchableOpacity
                                 activeOpacity={0.8}
-                                onPress={() => openUrl(`tel:${officerProfile.manager.phoneNumber}`)}
+                                onPress={handleCallManager}
+                                disabled={!reportingManager?.phone}
                                 className="h-8 w-8 items-center justify-center rounded-[8px] border border-[#DDE2FF] bg-white"
+                                style={{ opacity: reportingManager?.phone ? 1 : 0.45 }}
                             >
                                 <Ionicons name="call-outline" size={15} color="#4A43EC" />
                             </TouchableOpacity>

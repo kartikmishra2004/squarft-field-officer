@@ -5,6 +5,7 @@ import projectReducer from './slices/projectSlice';
 import projectsSlice from './slices/projectsSlice';
 import notificationReducer from './slices/notificationSlice';
 import dashboardReducer from './slices/dashboardSlice';
+import profileReducer from './slices/profileSlice';
 
 export const store = configureStore({
     reducer: {
@@ -14,5 +15,6 @@ export const store = configureStore({
         projects: projectsSlice,
         notifications: notificationReducer,
         dashboard: dashboardReducer,
+        profile: profileReducer,
     },
 });

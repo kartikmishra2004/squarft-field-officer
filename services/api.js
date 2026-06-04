@@ -82,6 +82,20 @@ export const dashboardAPI = {
   },
 };
 
+export const profileAPI = {
+  getProfile: async () => {
+    const { data } = await api.get('/api/v1/field-officer/profile');
+    return data;
+  },
+  changePassword: async (currentPassword, newPassword) => {
+    const { data } = await api.put('/api/v1/profile/change-password', {
+      currentPassword,
+      newPassword,
+    });
+    return data;
+  },
+};
+
 export const leadsAPI = {
   createLead: async (payload) => {
     const { data } = await api.post('/api/v1/field-officer/leads', payload);
