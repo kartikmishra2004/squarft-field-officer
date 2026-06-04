@@ -168,7 +168,7 @@ export default function Projects() {
 
                 <ScrollView
                     className="flex-1"
-                    contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 96, paddingTop: 2 }}
+                    contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 106, paddingTop: 2 }}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                 >
@@ -241,6 +241,17 @@ export default function Projects() {
                                                 onPress={() => {
                                                     dispatch(markProjectContacted(lead.id));
                                                     openUrl(`tel:${lead.contact_number}`);
+                                                    leadsAPI.recordCall(lead.id)
+                                                        .then((res) => {
+                                                            if (res?.data?.lead) {
+                                                                setLeads((prev) => prev.map((l) =>
+                                                                    l.id === lead.id
+                                                                        ? { ...l, stage: res.data.lead.stage }
+                                                                        : l
+                                                                ));
+                                                            }
+                                                        })
+                                                        .catch(() => {});
                                                 }}
                                                 className="mr-2 h-7 w-7 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC]"
                                             >

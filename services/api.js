@@ -94,12 +94,43 @@ export const leadsAPI = {
     const { data } = await api.get('/api/v1/field-officer/leads', { params });
     return data;
   },
+  // Returns lead + journey + follow_ups + meetings + form meta in one call
+  getLeadDetails: async (id) => {
+    const { data } = await api.get(`/api/v1/field-officer/leads/${id}`);
+    return data;
+  },
+  // Kept for backward compat — delegates to getLeadDetails
   getLeadById: async (id) => {
     const { data } = await api.get(`/api/v1/field-officer/leads/${id}`);
     return data;
   },
-  getLeadTimeline: async (id) => {
-    const { data } = await api.get(`/api/v1/field-officer/leads/${id}/timeline`);
+  createFollowUp: async (leadId, payload) => {
+    // payload may include files (voice_note / site_photo) — use FormData when present
+    if (payload instanceof FormData) {
+      const { data } = await api.post(
+        `/api/v1/field-officer/leads/${leadId}/follow-ups`,
+        payload,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      return data;
+    }
+    const { data } = await api.post(`/api/v1/field-officer/leads/${leadId}/follow-ups`, payload);
+    return data;
+  },
+  scheduleMeeting: async (leadId, payload) => {
+    const { data } = await api.post(`/api/v1/field-officer/leads/${leadId}/meetings`, payload);
+    return data;
+  },
+  recordCall: async (leadId) => {
+    const { data } = await api.post(`/api/v1/field-officer/leads/${leadId}/call`);
+    return data;
+  },
+  getFollowUpOptions: async () => {
+    const { data } = await api.get('/api/v1/field-officer/leads/follow-up/options');
+    return data;
+  },
+  getMeetingOptions: async () => {
+    const { data } = await api.get('/api/v1/field-officer/leads/meeting/options');
     return data;
   },
 };

@@ -370,7 +370,7 @@ function ProjectContextCard({ project }) {
     );
 }
 
-function FollowUpForm({ project, onSave }) {
+function FollowUpForm({ project, onSave, submitting }) {
     const [followUpType, setFollowUpType] = useState(followUpTypes[0]);
     const [outcome, setOutcome] = useState("");
     const [outcomeOpen, setOutcomeOpen] = useState(false);
@@ -409,6 +409,10 @@ function FollowUpForm({ project, onSave }) {
     };
 
     const handleSave = () => {
+        if (!outcome) {
+            Alert.alert("Missing field", "Please select an outcome.");
+            return;
+        }
         onSave({
             id: `followup-${project.id}-${Date.now()}`,
             projectId: project.id,
@@ -422,6 +426,9 @@ function FollowUpForm({ project, onSave }) {
             note: remarks.trim() || nextAction,
             status: followUpStatus,
             tone: followUpStatus === "Overdue" ? "danger" : followUpStatus === "Hot" ? "hot" : "warning",
+            // File objects for FormData upload
+            voiceNoteFile: voiceNoteUri ? { uri: voiceNoteUri } : null,
+            sitePhotoFile: sitePhoto ? { uri: sitePhoto.uri } : null,
             meta: {
                 followUpType,
                 outcome,
@@ -678,15 +685,21 @@ function FollowUpForm({ project, onSave }) {
                 </View>
             </TouchableOpacity>
 
-            <TouchableOpacity activeOpacity={0.9} onPress={handleSave} className="mt-4 h-11 flex-row items-center justify-center rounded-[10px] bg-[#16A34A]">
-                <Ionicons name="checkmark" size={14} color="#fff" />
-                <Text className="ml-1.5 text-[12px] font-lato-bold text-white">Save Follow-up</Text>
+            <TouchableOpacity activeOpacity={0.9} onPress={handleSave} disabled={submitting} className="mt-4 h-11 flex-row items-center justify-center rounded-[10px] bg-[#16A34A]">
+                {submitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                    <>
+                        <Ionicons name="checkmark" size={14} color="#fff" />
+                        <Text className="ml-1.5 text-[12px] font-lato-bold text-white">Save Follow-up</Text>
+                    </>
+                )}
             </TouchableOpacity>
         </BottomSheetScrollView>
     );
 }
 
-function MeetingForm({ project, onSave }) {
+function MeetingForm({ project, onSave, submitting }) {
     const [meetingType, setMeetingType] = useState(meetingTypes[0]);
     const [meetingStatus, setMeetingStatus] = useState("Scheduled");
     const [statusOpen, setStatusOpen] = useState(false);
@@ -827,9 +840,15 @@ function MeetingForm({ project, onSave }) {
                 }}
             />
 
-            <TouchableOpacity activeOpacity={0.9} onPress={handleSave} className="mt-4 h-11 flex-row items-center justify-center rounded-[10px] bg-[#4A43EC]">
-                <Ionicons name="calendar-outline" size={14} color="#fff" />
-                <Text className="ml-1.5 text-[12px] font-lato-bold text-white">Schedule Meeting</Text>
+            <TouchableOpacity activeOpacity={0.9} onPress={handleSave} disabled={submitting} className="mt-4 h-11 flex-row items-center justify-center rounded-[10px] bg-[#4A43EC]">
+                {submitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                    <>
+                        <Ionicons name="calendar-outline" size={14} color="#fff" />
+                        <Text className="ml-1.5 text-[12px] font-lato-bold text-white">Schedule Meeting</Text>
+                    </>
+                )}
             </TouchableOpacity>
         </BottomSheetScrollView>
     );
@@ -992,29 +1011,31 @@ function Overview({ project, onReject }) {
     );
 }
 
-function FollowUpCard({ item, onDone }) {
+function FollowUpCard({ item, projectName, onDone }) {
     const tone = followUpToneStyles[item.tone] ?? followUpToneStyles.warning;
 
     return (
         <View className="mb-2 rounded-[12px] border border-[#EEF0F4] bg-white px-3 py-2.5">
             <View className="flex-row items-start justify-between">
-                <View className="mr-2 flex-1">
-                    <Text className="text-[12px] font-lato-bold text-[#111827]" numberOfLines={1}>
-                        {item.projectName}
-                    </Text>
-                    <View className="mt-0.5 flex-row items-center">
-                        <Text className="text-[10px] text-[#6B7280]" numberOfLines={1}>
-                            {item.builderName}
-                        </Text>
-                        <View className="mx-1.5 h-0.5 w-0.5 rounded-full bg-[#C8CDD8]" />
-                        <Text className="text-[10px] text-[#6B7280]">{item.time}</Text>
-                    </View>
-                </View>
+                <Text className="text-[12px] font-lato-bold text-[#111827]" numberOfLines={1}>
+                    {projectName || item.projectName}
+                </Text>
                 <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: tone.badgeBg }}>
                     <Text className="text-[9px] font-semibold" style={{ color: tone.badgeText }}>
                         {item.status}
                     </Text>
                 </View>
+            </View>
+            <View className="mt-0.5 flex-row items-center">
+                {item.meta?.followUpType ? (
+                    <>
+                        <Text className="text-[9px] font-lato-bold uppercase tracking-[1.5px] text-[#64748B]">
+                            {item.meta.followUpType.replace(/_/g, " ")}
+                        </Text>
+                        <View className="mx-1.5 h-0.5 w-0.5 rounded-full bg-[#C8CDD8]" />
+                    </>
+                ) : null}
+                <Text className="text-[10px] text-[#6B7280]">{item.time}</Text>
             </View>
             <View className="mt-2 rounded-[9px] bg-[#F8F9FF] px-2.5 py-2">
                 <Text className="text-[10px] leading-4 text-[#4B5563]">{item.note}</Text>
@@ -1040,29 +1061,27 @@ function FollowUpCard({ item, onDone }) {
     );
 }
 
-function MeetingCard({ item, onDone }) {
+function MeetingCard({ item, projectName, onDone }) {
     const tone = meetingToneStyles[item.tone] ?? meetingToneStyles.primary;
 
     return (
         <View className="mb-2 rounded-[12px] border border-[#EEF0F4] bg-white px-3 py-2.5">
             <View className="flex-row items-start justify-between">
-                <View className="mr-2 flex-1">
-                    <Text className="text-[12px] font-lato-bold text-[#111827]" numberOfLines={1}>
-                        {item.projectName}
-                    </Text>
-                    <View className="mt-0.5 flex-row items-center">
-                        <Text className="text-[10px] text-[#6B7280]" numberOfLines={1}>
-                            {item.location} - {item.type}
-                        </Text>
-                        <View className="mx-1.5 h-0.5 w-0.5 rounded-full bg-[#C8CDD8]" />
-                        <Text className="text-[10px] text-[#6B7280]">{item.time}</Text>
-                    </View>
-                </View>
+                <Text className="text-[12px] font-lato-bold text-[#111827]" numberOfLines={1}>
+                    {projectName || item.projectName}
+                </Text>
                 <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: tone.badgeBg }}>
                     <Text className="text-[9px] font-semibold" style={{ color: tone.badgeText }}>
                         {item.status}
                     </Text>
                 </View>
+            </View>
+            <View className="mt-0.5 flex-row items-center">
+                <Text className="text-[9px] font-lato-bold uppercase tracking-[0.5px] text-[#64748B]">
+                    {item.type}
+                </Text>
+                <View className="mx-1.5 h-0.5 w-0.5 rounded-full bg-[#C8CDD8]" />
+                <Text className="text-[10px] text-[#6B7280]">{item.time}</Text>
             </View>
             <View className="mt-2 rounded-[9px] bg-[#F8F9FF] px-2.5 py-2">
                 <Text className="text-[10px] leading-4 text-[#4B5563]">
@@ -1126,9 +1145,9 @@ function Activity({ project, activeActivityTab, onActivityTabChange, onActivityD
 
             {items.map((item) =>
                 activeActivityTab === "followUp" ? (
-                    <FollowUpCard key={item.id} item={item} onDone={(activityId) => onActivityDone("followUp", activityId)} />
+                    <FollowUpCard key={item.id} item={item} projectName={project.projectName} onDone={(activityId) => onActivityDone("followUp", activityId)} />
                 ) : (
-                    <MeetingCard key={item.id} item={item} onDone={(activityId) => onActivityDone("meeting", activityId)} />
+                    <MeetingCard key={item.id} item={item} projectName={project.projectName} onDone={(activityId) => onActivityDone("meeting", activityId)} />
                 ),
             )}
 
@@ -1153,6 +1172,99 @@ const stageDisplayMap = {
     rejected: "Rejected",
 };
 
+// Map backend follow_up values → UI shape
+const normalizeFollowUps = (apiFollowUps = []) =>
+    apiFollowUps.map((f) => ({
+        id: String(f.id),
+        projectId: String(f.lead_id),
+        time: f.next_follow_up_at
+            ? new Date(f.next_follow_up_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+            : "",
+        note: f.remarks || f.next_action || "",
+        status: f.follow_up_status
+            ? f.follow_up_status.charAt(0).toUpperCase() + f.follow_up_status.slice(1)
+            : "Warm",
+        tone: f.follow_up_status === "hot" ? "hot" : f.follow_up_status === "cold" ? "warning" : "warning",
+        isDone: false,
+        voice_note_url: f.voice_note_url || null,
+        site_photo_url: f.site_photo_url || null,
+        meta: {
+            followUpType: f.follow_up_type,
+            outcome: f.outcome,
+            followUpStatus: f.follow_up_status,
+            nextAction: f.next_action,
+            nextFollowUpAt: f.next_follow_up_at,
+        },
+    }));
+
+// Map backend meetings → UI shape
+const normalizeMeetings = (apiMeetings = []) =>
+    apiMeetings.map((m) => ({
+        id: String(m.id),
+        location: m.location_address || "",
+        type: m.meeting_type
+            ? m.meeting_type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+            : "Meeting",
+        time: m.meeting_at
+            ? new Date(m.meeting_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+            : "",
+        status: m.meeting_status
+            ? m.meeting_status.charAt(0).toUpperCase() + m.meeting_status.slice(1)
+            : "Scheduled",
+        tone: m.meeting_status === "completed" ? "success" : "primary",
+        isDone: m.meeting_status === "completed",
+        meta: {
+            scheduledAt: m.meeting_at,
+            agenda: m.agenda || [],
+            notes: m.notes_preparation || "",
+            reminder: m.reminder_minutes,
+        },
+    }));
+
+// Normalize API lead shape → internal project shape
+const normalizeApiLead = (d, journey = [], follow_ups = [], meetings = []) => {
+    const displayStage = stageDisplayMap[d.stage] || "New Lead Added";
+    const stageHistory = journey.map((t) => ({
+        stage: stageDisplayMap[t.stage] || t.stage,
+        note: t.description || t.title || "",
+        at: t.created_at,
+    }));
+    return {
+        id: String(d.id),
+        projectName: d.project_name || d.projectName || "",
+        developerName: d.builder_name || d.developerName || "",
+        contactPerson: d.contact_person || "",
+        phoneNumber: d.contact_number || d.phoneNumber || "",
+        city: d.city || "",
+        location: d.area || d.location || "",
+        area: d.area || "",
+        colony: d.colony_landmark || "",
+        fullAddress: d.full_address || "",
+        category: d.property_category || "",
+        projectType: [d.property_category, d.property_subtype, d.configuration].filter(Boolean).join(" . "),
+        type: d.lead_temperature
+            ? d.lead_temperature.charAt(0).toUpperCase() + d.lead_temperature.slice(1)
+            : "Warm",
+        status: d.stage ? d.stage.replace(/_/g, " ") : "New Lead",
+        statusType: d.stage || "new_lead",
+        nextAction: d.next_action || d.remarks || "",
+        lastContact: d.updated_at
+            ? new Date(d.updated_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+            : "Not contacted",
+        addedOn: d.created_at
+            ? new Date(d.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+            : "",
+        builderNotes: d.remarks || "",
+        journeyStage: displayStage,
+        onboardingProgress: d.onboarding_progress || 0,
+        stageHistory,
+        followUps: normalizeFollowUps(follow_ups),
+        meetings: normalizeMeetings(meetings),
+        onboardingData: null,
+        onboardingDraft: null,
+    };
+};
+
 export default function ProjectDetail() {
     const router = useRouter();
     const { id, leadData } = useLocalSearchParams();
@@ -1161,94 +1273,74 @@ export default function ProjectDetail() {
     const [activeTab, setActiveTab] = useState("overview");
     const [activeActivityTab, setActiveActivityTab] = useState("followUp");
     const [activeSheet, setActiveSheet] = useState("followUp");
+    const [submitting, setSubmitting] = useState(false);
     const bottomSheetRef = useRef(null);
     const sheetSnapPoints = useMemo(() => ["86%"], []);
     const reduxProject = useSelector((state) => selectProjectById(state, projectId));
 
-    // Normalize API lead shape → internal project shape
-    const normalizeApiLead = (d, timeline = []) => {
-        const displayStage = stageDisplayMap[d.stage] || "New Lead Added";
-        const stageHistory = timeline.map((t) => ({
-            stage: stageDisplayMap[t.stage] || t.stage,
-            note: t.description || t.title || "",
-            at: t.created_at,
-        }));
-        return {
-            id: d.id,
-            projectName: d.project_name || d.projectName || "",
-            developerName: d.builder_name || d.developerName || "",
-            contactPerson: d.contact_person || "",
-            phoneNumber: d.contact_number || d.phoneNumber || "",
-            city: d.city || "",
-            location: d.area || d.location || "",
-            area: d.area || "",
-            colony: d.colony_landmark || "",
-            fullAddress: d.full_address || "",
-            category: d.property_category || "",
-            projectType: [d.property_category, d.property_subtype, d.configuration].filter(Boolean).join(" . "),
-            type: d.lead_temperature
-                ? d.lead_temperature.charAt(0).toUpperCase() + d.lead_temperature.slice(1)
-                : "Warm",
-            status: d.stage ? d.stage.replace(/_/g, " ") : "New Lead",
-            statusType: d.stage || "new_lead",
-            nextAction: d.next_action || d.remarks || "",
-            lastContact: d.updated_at
-                ? new Date(d.updated_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
-                : "Not contacted",
-            addedOn: d.created_at
-                ? new Date(d.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
-                : "",
-            builderNotes: d.remarks || "",
-            journeyStage: displayStage,
-            onboardingProgress: d.onboarding_progress || 0,
-            stageHistory,
-            followUps: [],
-            meetings: [],
-            onboardingData: null,
-            onboardingDraft: null,
-        };
-    };
-
     const [apiProject, setApiProject] = useState(() => {
         if (leadData) {
-            try { return normalizeApiLead(JSON.parse(leadData)); } catch { return null; }
+            try {
+                const parsed = JSON.parse(leadData);
+                return normalizeApiLead(parsed, [], [], []);
+            } catch { return null; }
         }
         return null;
     });
-    const [apiLoading, setApiLoading] = useState(!reduxProject && !leadData);
+    const [apiLoading, setApiLoading] = useState(!reduxProject);
 
+    // Merge updated lead fields from any API response into apiProject
+    const applyLeadUpdate = useCallback((updatedLead, extraFields = {}) => {
+        if (!updatedLead) return;
+        const displayStage = stageDisplayMap[updatedLead.stage] || "New Lead Added";
+        setApiProject((prev) => {
+            if (!prev) return prev;
+            const alreadyHas = (prev.stageHistory || []).some((s) => s.stage === displayStage);
+            return {
+                ...prev,
+                statusType: updatedLead.stage || prev.statusType,
+                status: updatedLead.stage ? updatedLead.stage.replace(/_/g, " ") : prev.status,
+                journeyStage: displayStage,
+                type: updatedLead.lead_temperature
+                    ? updatedLead.lead_temperature.charAt(0).toUpperCase() + updatedLead.lead_temperature.slice(1)
+                    : prev.type,
+                nextAction: updatedLead.next_action || prev.nextAction,
+                onboardingProgress: updatedLead.onboarding_progress ?? prev.onboardingProgress,
+                stageHistory: alreadyHas
+                    ? prev.stageHistory
+                    : [...(prev.stageHistory || []), {
+                        stage: displayStage,
+                        note: extraFields.note || "",
+                        at: new Date().toISOString(),
+                    }],
+                ...extraFields,
+            };
+        });
+    }, []);
+
+    // Single call: getLeadDetails returns lead + journey + follow_ups + meetings
     useEffect(() => {
-        if (!reduxProject && !leadData) {
+        if (!reduxProject) {
             setApiLoading(true);
-            leadsAPI.getLeadById(projectId)
-                .then((res) => setApiProject(normalizeApiLead(res.data)))
-                .catch(() => setApiProject(null))
-                .finally(() => setApiLoading(false));
-        }
-    }, [projectId, reduxProject, leadData]);
-
-    // Fetch timeline for API leads to populate journey stages
-    useEffect(() => {
-        if (!reduxProject && projectId) {
-            leadsAPI.getLeadTimeline(projectId)
+            leadsAPI.getLeadDetails(projectId)
                 .then((res) => {
-                    const timeline = res.data || [];
-                    setApiProject((prev) => {
-                        if (!prev) return prev;
-                        const displayStage = stageDisplayMap[prev.statusType] || "New Lead Added";
-                        const stageHistory = timeline.map((t) => ({
-                            stage: stageDisplayMap[t.stage] || t.stage,
-                            note: t.description || t.title || "",
-                            at: t.created_at,
-                        }));
-                        return { ...prev, journeyStage: displayStage, stageHistory };
-                    });
+                    const inner = res?.data || res || {};
+                    const { lead, journey, follow_ups, meetings } = inner;
+                    if (lead) {
+                        setApiProject(normalizeApiLead(lead, journey || [], follow_ups || [], meetings || []));
+                    }
                 })
-                .catch(() => {}); // timeline is non-critical, silent fail
+                .catch((err) => {
+                    console.log("getLeadDetails error", err?.response?.data || err?.message);
+                })
+                .finally(() => setApiLoading(false));
         }
     }, [projectId, reduxProject]);
 
-    const project = reduxProject || apiProject;
+    const project = useMemo(
+        () => reduxProject || apiProject,
+        [reduxProject, apiProject],
+    );
     const renderBackdrop = useCallback(
         (props) => <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.35} />,
         [],
@@ -1263,9 +1355,72 @@ export default function ProjectDetail() {
         bottomSheetRef.current?.dismiss();
     }, []);
 
+    // Build FormData for follow-up (handles optional file attachments)
+    const buildFollowUpPayload = (followUp) => {
+        const { meta, voiceNoteFile, sitePhotoFile } = followUp;
+        if (!voiceNoteFile && !sitePhotoFile) {
+            // Plain JSON — map UI values to backend snake_case option values
+            return {
+                follow_up_type: meta.followUpType?.toLowerCase().replace(/ /g, "_") || "call",
+                outcome: meta.outcome?.toLowerCase().replace(/ /g, "_") || "connected",
+                follow_up_status: meta.followUpStatus?.toLowerCase() || "warm",
+                next_action: meta.nextAction?.toLowerCase().replace(/ /g, "_") || "schedule_another_call",
+                next_follow_up_at: meta.nextFollowUpAt,
+                remarks: followUp.note || undefined,
+            };
+        }
+        const form = new FormData();
+        form.append("follow_up_type", meta.followUpType?.toLowerCase().replace(/ /g, "_") || "call");
+        form.append("outcome", meta.outcome?.toLowerCase().replace(/ /g, "_") || "connected");
+        form.append("follow_up_status", meta.followUpStatus?.toLowerCase() || "warm");
+        form.append("next_action", meta.nextAction?.toLowerCase().replace(/ /g, "_") || "schedule_another_call");
+        form.append("next_follow_up_at", meta.nextFollowUpAt);
+        if (followUp.note) form.append("remarks", followUp.note);
+        if (voiceNoteFile) {
+            form.append("voice_note", { uri: voiceNoteFile.uri, name: "voice_note.m4a", type: "audio/m4a" });
+        }
+        if (sitePhotoFile) {
+            form.append("site_photo", { uri: sitePhotoFile.uri, name: "site_photo.jpg", type: "image/jpeg" });
+        }
+        return form;
+    };
+
     const saveFollowUp = useCallback(
-        (followUp) => {
-            dispatch(addProjectFollowUp({ projectId, followUp }));
+        async (followUp) => {
+            setSubmitting(true);
+            try {
+                const payload = buildFollowUpPayload(followUp);
+                const res = await leadsAPI.createFollowUp(projectId, payload);
+                const { followUp: saved, lead: updatedLead } = res.data || {};
+                // Update local apiProject state with the saved follow-up and updated lead fields
+                setApiProject((prev) => {
+                    const base = prev || {};
+                    const newFollowUp = saved
+                        ? normalizeFollowUps([{ ...saved, lead_id: projectId }])[0]
+                        : { ...followUp, id: followUp.id || String(Date.now()) };
+                    const updatedFields = updatedLead ? {
+                        type: updatedLead.lead_temperature
+                            ? updatedLead.lead_temperature.charAt(0).toUpperCase() + updatedLead.lead_temperature.slice(1)
+                            : base.type,
+                        statusType: updatedLead.stage || base.statusType,
+                        status: updatedLead.stage ? updatedLead.stage.replace(/_/g, " ") : base.status,
+                        nextAction: updatedLead.next_action || base.nextAction,
+                        onboardingProgress: updatedLead.onboarding_progress || base.onboardingProgress,
+                    } : {};
+                    return {
+                        ...base,
+                        ...updatedFields,
+                        followUps: [newFollowUp, ...(base.followUps || [])],
+                    };
+                });
+                // Keep Redux in sync for leads that are also in Redux store
+                dispatch(addProjectFollowUp({ projectId, followUp }));
+            } catch (err) {
+                Alert.alert("Failed", err?.response?.data?.message || "Could not save follow-up. Please try again.");
+                return; // don't close sheet on error
+            } finally {
+                setSubmitting(false);
+            }
             closeSheet();
             setActiveTab("activity");
             setActiveActivityTab("followUp");
@@ -1274,8 +1429,72 @@ export default function ProjectDetail() {
     );
 
     const saveMeeting = useCallback(
-        (meeting) => {
-            dispatch(addProjectMeeting({ projectId, meeting }));
+        async (meeting) => {
+            setSubmitting(true);
+            try {
+                const reminderMap = {
+                    "No reminder": 0,
+                    "15 minutes before": 15,
+                    "30 minutes before": 30,
+                    "1 hour before": 60,
+                    "1 day before": 1440,
+                };
+                const agendaValueMap = {
+                    "Company Introduction": "company_introduction",
+                    "Project Collaboration Discussion": "project_collaboration_discussion",
+                    "Pricing Discussion": "pricing_discussion",
+                    "Inventory Collection": "inventory_collection",
+                    "Document Collection": "document_collection",
+                };
+                const meetingTypeValueMap = {
+                    "Site Meeting": "site_meeting",
+                    "Builder Office": "builder_office",
+                    "SquarFT Office": "squarft_office",
+                    "Phone": "phone",
+                    "Video Call": "video_call",
+                };
+                const meetingStatusValueMap = {
+                    "Scheduled": "scheduled",
+                    "Today": "scheduled",
+                    "Tomorrow": "scheduled",
+                    "Planned": "scheduled",
+                    "Done": "completed",
+                };
+                const payload = {
+                    meeting_type: meetingTypeValueMap[meeting.type] || "site_meeting",
+                    meeting_status: meetingStatusValueMap[meeting.status] || "scheduled",
+                    meeting_at: meeting.meta.scheduledAt,
+                    location_address: meeting.location,
+                    agenda: (meeting.meta.agenda || []).map((a) => agendaValueMap[a] || a),
+                    notes_preparation: meeting.meta.notes || undefined,
+                    reminder_minutes: reminderMap[meeting.meta.reminder] ?? 30,
+                };
+                const res = await leadsAPI.scheduleMeeting(projectId, payload);
+                const { meeting: saved, lead: updatedLead } = res.data || {};
+                setApiProject((prev) => {
+                    const base = prev || {};
+                    const newMeeting = saved
+                        ? normalizeMeetings([{ ...saved, lead_id: projectId }])[0]
+                        : { ...meeting, id: meeting.id || String(Date.now()) };
+                    const updatedFields = updatedLead ? {
+                        statusType: updatedLead.stage || base.statusType,
+                        status: updatedLead.stage ? updatedLead.stage.replace(/_/g, " ") : base.status,
+                        nextAction: updatedLead.next_action || base.nextAction,
+                        onboardingProgress: updatedLead.onboarding_progress || base.onboardingProgress,
+                    } : {};
+                    return {
+                        ...base,
+                        ...updatedFields,
+                        meetings: [newMeeting, ...(base.meetings || [])],
+                    };
+                });
+                dispatch(addProjectMeeting({ projectId, meeting }));
+            } catch (err) {
+                Alert.alert("Failed", err?.response?.data?.message || "Could not schedule meeting. Please try again.");
+                return;
+            } finally {
+                setSubmitting(false);
+            }
             closeSheet();
             setActiveTab("activity");
             setActiveActivityTab("meeting");
@@ -1286,6 +1505,28 @@ export default function ProjectDetail() {
     const callProject = useCallback(() => {
         dispatch(markProjectContacted(projectId));
         openUrl(`tel:${project?.phoneNumber || ""}`);
+        leadsAPI.recordCall(projectId)
+            .then((res) => {
+                if (res?.data?.lead) {
+                    const { stage, onboarding_progress } = res.data.lead;
+                    const displayStage = stageDisplayMap[stage] || "First Contact";
+                    setApiProject((prev) => {
+                        if (!prev) return prev;
+                        const alreadyHas = (prev.stageHistory || []).some((s) => s.stage === displayStage);
+                        return {
+                            ...prev,
+                            statusType: stage || prev.statusType,
+                            status: stage ? stage.replace(/_/g, " ") : prev.status,
+                            journeyStage: displayStage,
+                            onboardingProgress: onboarding_progress || prev.onboardingProgress,
+                            stageHistory: alreadyHas
+                                ? prev.stageHistory
+                                : [...(prev.stageHistory || []), { stage: displayStage, note: "Call initiated", at: new Date().toISOString() }],
+                        };
+                    });
+                }
+            })
+            .catch(() => {});
     }, [dispatch, project?.phoneNumber, projectId]);
 
     const markActivityDone = useCallback(
@@ -1440,9 +1681,9 @@ export default function ProjectDetail() {
                 handleIndicatorStyle={{ backgroundColor: "transparent" }}
             >
                 {activeSheet === "followUp" ? (
-                    <FollowUpForm project={project} onSave={saveFollowUp} />
+                    <FollowUpForm project={project} onSave={saveFollowUp} submitting={submitting} />
                 ) : (
-                    <MeetingForm project={project} onSave={saveMeeting} />
+                    <MeetingForm project={project} onSave={saveMeeting} submitting={submitting} />
                 )}
             </BottomSheetModal>
         </>
