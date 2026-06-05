@@ -11,13 +11,14 @@ import {
     TouchableOpacity,
     useWindowDimensions,
     View,
+    Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
 import ProjectLeadFormSheet from "../../components/ProjectLeadFormSheet";
 import { fetchDashboard } from "../../store/slices/dashboardSlice";
+import { leadsAPI } from "../../services/api";
 import {
-    markProjectActivityDone,
     markProjectContacted,
     selectAllProjectFollowUps,
     selectAllProjectMeetings,
@@ -139,15 +140,26 @@ export default function Home() {
 
     const visibleMeetings = apiMeetings
         ? apiMeetings.map((m) => ({
-              id: m.id, projectName: m.title, location: m.subtitle,
-              time: m.time, note: m.note, status: m.tag, tone: "primary",
+              id: m.id, // Meeting ID
+              projectId: m.leadId || m.projectId, // Lead ID for API calls
+              projectName: m.title, 
+              location: m.subtitle,
+              time: m.time, 
+              note: m.note, 
+              status: m.tag, 
+              tone: "primary",
           }))
         : meetingItems.filter((i) => !i.isDone);
 
     const visibleFollowUps = apiFollowUps
         ? apiFollowUps.map((f) => ({
-              id: f.id, projectName: f.title, builderName: f.subtitle,
-              time: f.time, note: f.note, status: f.tag,
+              id: f.id, // Follow-up ID
+              projectId: f.leadId || f.projectId, // Lead ID for API calls
+              projectName: f.title, 
+              builderName: f.subtitle,
+              time: f.time, 
+              note: f.note, 
+              status: f.tag,
               tone: f.tag === "Overdue" ? "danger" : f.tag === "Hot" ? "hot" : "warning",
           }))
         : followUpItems.filter((i) => !i.isDone);
@@ -199,12 +211,40 @@ export default function Home() {
         }).start(() => setLeadFormOpen(false));
     };
 
-    const markFollowUpDone = (item) => {
-        if (item) dispatch(markProjectActivityDone({ projectId: item.projectId, activityType: "followUp", activityId: item.id }));
+    const markFollowUpDone = async (item) => {
+        if (!item || !item.id || !item.projectId) {
+            Alert.alert("Error", "Invalid follow-up data");
+            return;
+        }
+        
+        try {
+            await leadsAPI.updateFollowUpCompletion(item.projectId, item.id, true);
+            Alert.alert("Success", "Follow-up marked as done");
+            // Refresh dashboard to update the UI
+            dispatch(fetchDashboard());
+        } catch (error) {
+            const errorMessage = error.response?.data?.message || error.message || "Failed to mark follow-up as done";
+            Alert.alert("Error", errorMessage);
+            console.error("Mark follow-up done error:", error);
+        }
     };
 
-    const markMeetingDone = (item) => {
-        if (item) dispatch(markProjectActivityDone({ projectId: item.projectId, activityType: "meeting", activityId: item.id }));
+    const markMeetingDone = async (item) => {
+        if (!item || !item.id || !item.projectId) {
+            Alert.alert("Error", "Invalid meeting data");
+            return;
+        }
+        
+        try {
+            await leadsAPI.updateMeetingCompletion(item.projectId, item.id, true);
+            Alert.alert("Success", "Meeting marked as done");
+            // Refresh dashboard to update the UI
+            dispatch(fetchDashboard());
+        } catch (error) {
+            const errorMessage = error.response?.data?.message || error.message || "Failed to mark meeting as done";
+            Alert.alert("Error", errorMessage);
+            console.error("Mark meeting done error:", error);
+        }
     };
 
     const callProject = (projectId, phoneNumber) => {

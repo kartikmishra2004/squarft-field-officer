@@ -108,18 +108,15 @@ export const leadsAPI = {
     const { data } = await api.get('/api/v1/field-officer/leads', { params });
     return data;
   },
-  // Returns lead + journey + follow_ups + meetings + form meta in one call
   getLeadDetails: async (id) => {
     const { data } = await api.get(`/api/v1/field-officer/leads/${id}`);
     return data;
   },
-  // Kept for backward compat — delegates to getLeadDetails
   getLeadById: async (id) => {
     const { data } = await api.get(`/api/v1/field-officer/leads/${id}`);
     return data;
   },
   createFollowUp: async (leadId, payload) => {
-    // payload may include files (voice_note / site_photo) — use FormData when present
     if (payload instanceof FormData) {
       const { data } = await api.post(
         `/api/v1/field-officer/leads/${leadId}/follow-ups`,
@@ -137,6 +134,28 @@ export const leadsAPI = {
   },
   recordCall: async (leadId) => {
     const { data } = await api.post(`/api/v1/field-officer/leads/${leadId}/call`);
+    return data;
+  },
+  updateFollowUpCompletion: async (leadId, followUpId, is_completed) => {
+    const { data } = await api.patch(
+      `/api/v1/field-officer/leads/${leadId}/follow-ups/${followUpId}/completion`,
+      { is_completed }
+    );
+    return data;
+  },
+  updateMeetingCompletion: async (leadId, meetingId, is_completed) => {
+    const { data } = await api.patch(
+      `/api/v1/field-officer/leads/${leadId}/meetings/${meetingId}/completion`,
+      { is_completed }
+    );
+    return data;
+  },
+  updateLeadJourney: async (leadId, payload) => {
+    const { data } = await api.patch(`/api/v1/field-officer/leads/${leadId}/journey`, payload);
+    return data;
+  },
+  rejectLead: async (leadId) => {
+    const { data } = await api.patch(`/api/v1/field-officer/leads/${leadId}/reject`);
     return data;
   },
   getFollowUpOptions: async () => {
