@@ -1,18 +1,51 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import { Platform } from "react-native";
+import { useEffect, useRef } from "react";
+import { Animated, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSelector } from "react-redux";
 
+const TAB_COLOR = "#4A43EC";
+const MUTED_TAB_COLOR = "#94A3B8";
+
 const icons = {
-    home: ["home-outline", "home"],
-    projects: ["business-outline", "business"],
-    profile: ["person-outline", "person"],
+    home: ["home", "home-outline"],
+    projects: ["business", "business-outline"],
+    profile: ["person-circle", "person-circle-outline"],
 };
 
-function TabIcon({ name, focused, color }) {
-    const [inactiveIcon, activeIcon] = icons[name];
-    return <Ionicons name={focused ? activeIcon : inactiveIcon} size={26} color={color} />;
+function TabIcon({ name, focused }) {
+    const [activeIcon, inactiveIcon] = icons[name];
+    const iconName = focused ? activeIcon : inactiveIcon;
+    const scale = useRef(new Animated.Value(focused ? 1 : 0.94)).current;
+    const translateY = useRef(new Animated.Value(focused ? -2 : 0)).current;
+
+    useEffect(() => {
+        if (focused) {
+            Animated.parallel([
+                Animated.sequence([
+                    Animated.timing(scale, { toValue: 1.18, duration: 120, useNativeDriver: true }),
+                    Animated.spring(scale, { toValue: 1, friction: 4, tension: 140, useNativeDriver: true }),
+                ]),
+                Animated.sequence([
+                    Animated.timing(translateY, { toValue: -5, duration: 120, useNativeDriver: true }),
+                    Animated.spring(translateY, { toValue: -2, friction: 5, tension: 120, useNativeDriver: true }),
+                ]),
+            ]).start();
+            return;
+        }
+
+        Animated.parallel([
+            Animated.timing(scale, { toValue: 0.94, duration: 120, useNativeDriver: true }),
+            Animated.timing(translateY, { toValue: 0, duration: 120, useNativeDriver: true }),
+        ]).start();
+    }, [focused, scale, translateY]);
+
+    return (
+        <Animated.View style={{ transform: [{ translateY }, { scale }] }}>
+            <Ionicons name={iconName} size={24} color={focused ? TAB_COLOR : MUTED_TAB_COLOR} />
+        </Animated.View>
+    );
 }
 
 export default function TabsLayout() {
@@ -24,9 +57,17 @@ export default function TabsLayout() {
     return (
         <Tabs
             screenOptions={{
-                tabBarShowLabel: false,
-                tabBarActiveTintColor: "#4A43EC",
-                tabBarInactiveTintColor: "#9CA3AF",
+                tabBarShowLabel: true,
+                tabBarActiveTintColor: TAB_COLOR,
+                tabBarInactiveTintColor: MUTED_TAB_COLOR,
+                tabBarLabelStyle: {
+                    fontSize: 11,
+                    fontFamily: "Lato_700Bold",
+                    marginTop: 2,
+                },
+                tabBarItemStyle: {
+                    paddingTop: 3,
+                },
                 tabBarStyle: searchActive
                     ? { display: "none" }
                     : {
@@ -38,10 +79,10 @@ export default function TabsLayout() {
                           borderTopLeftRadius: 45,
                           borderTopColor: "transparent",
                           backgroundColor: "#fff",
-                          paddingTop: 10,
+                          paddingTop: 12,
                           paddingHorizontal: 15,
-                          paddingBottom: Math.max(iosBottomPadding - 4, 4),
-                          height: Platform.OS === "ios" ? 74 : 68,
+                          paddingBottom: iosBottomPadding,
+                          height: Platform.OS === "ios" ? 88 : 82,
                           ...Platform.select({
                               ios: {
                                   shadowColor: "#000",
@@ -60,24 +101,24 @@ export default function TabsLayout() {
                 name="home"
                 options={{
                     headerShown: false,
-                    title: "Home",
-                    tabBarIcon: ({ focused, color }) => <TabIcon name="home" focused={focused} color={color} />,
+                    tabBarLabel: "Home",
+                    tabBarIcon: ({ focused }) => <TabIcon name="home" focused={focused} />,
                 }}
             />
             <Tabs.Screen
                 name="projects"
                 options={{
                     headerShown: false,
-                    title: "Projects",
-                    tabBarIcon: ({ focused, color }) => <TabIcon name="projects" focused={focused} color={color} />,
+                    tabBarLabel: "Projects",
+                    tabBarIcon: ({ focused }) => <TabIcon name="projects" focused={focused} />,
                 }}
             />
             <Tabs.Screen
                 name="profile"
                 options={{
                     headerShown: false,
-                    title: "Profile",
-                    tabBarIcon: ({ focused, color }) => <TabIcon name="profile" focused={focused} color={color} />,
+                    tabBarLabel: "Profile",
+                    tabBarIcon: ({ focused }) => <TabIcon name="profile" focused={focused} />,
                 }}
             />
             <Tabs.Screen name="favourite" options={{ href: null }} />
