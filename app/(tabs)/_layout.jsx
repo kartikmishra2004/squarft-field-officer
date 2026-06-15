@@ -11,6 +11,7 @@ const MUTED_TAB_COLOR = "#94A3B8";
 const icons = {
     home: ["home", "home-outline"],
     projects: ["business", "business-outline"],
+    tasks: ["checkbox", "checkbox-outline"],
     profile: ["person-circle", "person-circle-outline"],
 };
 
@@ -111,6 +112,14 @@ export default function TabsLayout() {
                     headerShown: false,
                     tabBarLabel: "Projects",
                     tabBarIcon: ({ focused }) => <TabIcon name="projects" focused={focused} />,
+                }}
+            />
+            <Tabs.Screen
+                name="tasks"
+                options={{
+                    headerShown: false,
+                    tabBarLabel: "Tasks",
+                    tabBarIcon: ({ focused }) => <TabIcon name="tasks" focused={focused} />,
                 }}
             />
             <Tabs.Screen
