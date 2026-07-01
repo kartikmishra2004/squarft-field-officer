@@ -116,6 +116,12 @@ export default function Profile() {
         openUrl(`tel:${reportingManager.phone}`, "Unable to call this number.");
     };
 
+    const handleQuickLinkPress = (link) => {
+        if (link.label === "Map View - Nearby Projects") {
+            router.push("/(screens)/nearby-projects");
+        }
+    };
+
     const stats = statConfig.map((stat) => ({
         ...stat,
         value: performanceThisMonth?.[stat.key] ?? 0,
@@ -229,6 +235,7 @@ export default function Profile() {
                             <TouchableOpacity
                                 key={link.label}
                                 activeOpacity={0.8}
+                                onPress={() => handleQuickLinkPress(link)}
                                 className="h-11 flex-row items-center border-b border-[#F1F5F9] last:border-b-0"
                             >
                                 <Ionicons name={link.icon} size={15} color="#4A43EC" />

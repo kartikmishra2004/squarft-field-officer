@@ -96,6 +96,15 @@ export const profileAPI = {
   },
 };
 
+export const projectsAPI = {
+  getNearbyProjects: async ({ latitude, longitude } = {}) => {
+    const { data } = await api.get('/api/v1/projects/nearby', {
+      params: { latitude, longitude },
+    });
+    return data;
+  },
+};
+
 export const leadsAPI = {
   createLead: async (payload) => {
     const { data } = await api.post('/api/v1/field-officer/leads', payload);

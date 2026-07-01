@@ -8,8 +8,10 @@ import {
     useAudioRecorder,
     useAudioRecorderState,
 } from "expo-audio";
+import * as Location from "expo-location";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+    ActivityIndicator,
     Alert,
     Animated,
     Dimensions,
@@ -25,6 +27,7 @@ import {
     View,
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
+import MapView, { PROVIDER_GOOGLE } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch } from "react-redux";
 import { addProject } from "../store/slices/projectsSlice";
@@ -40,6 +43,13 @@ const IOS_KEYBOARD_EXTRA_SCROLL = 40;
 const IOS_KEYBOARD_EXTRA_HEIGHT = 66;
 const ANDROID_CONTENT_BOTTOM_PADDING = 180;
 const IOS_CONTENT_BOTTOM_PADDING = 140;
+const MAP_DELTA = 0.01;
+const DEFAULT_MAP_REGION = {
+    latitude: 22.7196,
+    longitude: 75.8577,
+    latitudeDelta: 0.08,
+    longitudeDelta: 0.08,
+};
 const mainTypes = [
     {
         id: "Residential",
@@ -146,6 +156,104 @@ function resetLeadForm() {
         builderNotes: "",
         followUpDate: "",
         followUpISO: null,
+    };
+}
+
+function getRegionFromCoordinate(coordinate, delta = MAP_DELTA) {
+    return {
+        latitude: coordinate.latitude,
+        longitude: coordinate.longitude,
+        latitudeDelta: delta,
+        longitudeDelta: delta,
+    };
+}
+
+function compactAddressParts(parts) {
+    const normalized = [];
+
+    parts.forEach((part) => {
+        const value = typeof part === "string" ? part.trim() : "";
+
+        if (value && !normalized.some((item) => item.toLowerCase() === value.toLowerCase())) {
+            normalized.push(value);
+        }
+    });
+
+    return normalized.join(", ");
+}
+
+function firstDifferentAddressPart(parts, usedParts = []) {
+    const used = usedParts
+        .filter(Boolean)
+        .map((part) => part.trim().toLowerCase());
+
+    return (
+        parts.find((part) => {
+            const value = typeof part === "string" ? part.trim() : "";
+
+            return value && !used.includes(value.toLowerCase());
+        }) || ""
+    );
+}
+
+function formatReverseGeocodedAddress(address) {
+    if (!address) return "";
+
+    return compactAddressParts([
+        address.name,
+        address.streetNumber && address.street
+            ? `${address.streetNumber} ${address.street}`
+            : address.street,
+        address.district,
+        address.city,
+        address.subregion,
+        address.region,
+        address.postalCode,
+        address.country,
+    ]);
+}
+
+function formatCoordinateAddress(coordinate) {
+    return `${coordinate.latitude.toFixed(6)}, ${coordinate.longitude.toFixed(6)}`;
+}
+
+function getStreetAddress(address) {
+    if (!address) return "";
+
+    return address.streetNumber && address.street
+        ? `${address.streetNumber} ${address.street}`
+        : address.street || "";
+}
+
+function getLocationFieldsFromAddress(address, coordinate) {
+    const city = firstDifferentAddressPart([
+        address?.city,
+        address?.subregion,
+        address?.district,
+        address?.region,
+    ]);
+    const area = firstDifferentAddressPart([
+        address?.district,
+        address?.street,
+        address?.subregion,
+        address?.city,
+    ], [city]);
+    const colony = compactAddressParts([
+        firstDifferentAddressPart([
+            address?.name,
+            getStreetAddress(address),
+            address?.district,
+            address?.subregion,
+        ], [city, area]),
+        area,
+    ]);
+    const fullAddress = formatReverseGeocodedAddress(address) || formatCoordinateAddress(coordinate);
+
+    return {
+        city,
+        area,
+        colony,
+        fullAddress,
     };
 }
 
@@ -372,6 +480,15 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
     const [followUpPickerOpen, setFollowUpPickerOpen] = useState(false);
     const [followUpPickerStep, setFollowUpPickerStep] = useState("date");
     const [selectedFollowUpDate, setSelectedFollowUpDate] = useState(null);
+    const [mapPickerVisible, setMapPickerVisible] = useState(false);
+    const [mapRegion, setMapRegion] = useState(DEFAULT_MAP_REGION);
+    const [pickedCoordinate, setPickedCoordinate] = useState(null);
+    const [locatingMap, setLocatingMap] = useState(false);
+    const [resolvingAddress, setResolvingAddress] = useState(false);
+    const [mapInteracting, setMapInteracting] = useState(false);
+    const [mapMessage, setMapMessage] = useState("");
+    const mapRef = useRef(null);
+    const mapResolveRequestRef = useRef(0);
     const visibleProjectTypes = subTypesData[category] ?? [];
     const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
     const recorderState = useAudioRecorderState(audioRecorder, 250);
@@ -398,6 +515,135 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
 
     const setField = (field) => (value) => {
         setForm((current) => ({ ...current, [field]: value }));
+    };
+
+    const centerMapOnCoordinate = (coordinate) => {
+        const nextRegion = getRegionFromCoordinate(coordinate);
+
+        setMapRegion(nextRegion);
+        mapRef.current?.animateToRegion?.(nextRegion, 300);
+    };
+
+    const updateAddressFromCoordinate = async (coordinate) => {
+        const requestId = mapResolveRequestRef.current + 1;
+
+        mapResolveRequestRef.current = requestId;
+        setResolvingAddress(true);
+        setMapMessage("Fetching accurate address for selected location...");
+
+        try {
+            const [address] = await Location.reverseGeocodeAsync(coordinate);
+            const locationFields = getLocationFieldsFromAddress(address, coordinate);
+
+            if (requestId !== mapResolveRequestRef.current) return;
+
+            setForm((current) => ({
+                ...current,
+                city: locationFields.city || current.city,
+                area: locationFields.area || current.area,
+                colony: locationFields.colony || current.colony,
+                fullAddress: locationFields.fullAddress,
+            }));
+            setMapMessage("Location fields updated from the selected map point.");
+        } catch {
+            if (requestId !== mapResolveRequestRef.current) return;
+
+            const coordinateAddress = formatCoordinateAddress(coordinate);
+
+            setForm((current) => ({ ...current, fullAddress: coordinateAddress }));
+            setMapMessage("Could not fetch address, so coordinates were added.");
+        } finally {
+            if (requestId === mapResolveRequestRef.current) {
+                setResolvingAddress(false);
+            }
+        }
+    };
+
+    const selectMapCoordinate = (coordinate, shouldAnimate = true) => {
+        setPickedCoordinate(coordinate);
+
+        if (shouldAnimate) {
+            centerMapOnCoordinate(coordinate);
+        }
+
+        updateAddressFromCoordinate(coordinate);
+    };
+
+    const getCurrentCoordinate = async () => {
+        setLocatingMap(true);
+
+        try {
+            const permission = await Location.requestForegroundPermissionsAsync();
+
+            if (!permission.granted) {
+                setMapMessage("Location permission denied. Tap the map to choose manually.");
+                return null;
+            }
+
+            const location = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+            });
+
+            return {
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+            };
+        } catch {
+            setMapMessage("Could not detect current location. Tap the map to choose manually.");
+            return null;
+        } finally {
+            setLocatingMap(false);
+        }
+    };
+
+    const openLocationPicker = async () => {
+        const shouldUseCurrentLocation = mapPickerVisible;
+
+        setMapPickerVisible(true);
+        setMapMessage("");
+
+        if (Platform.OS === "web") {
+            setMapMessage("Map picking is available on Android or iOS.");
+            return;
+        }
+
+        if (shouldUseCurrentLocation) {
+            const coordinate = await getCurrentCoordinate();
+
+            if (coordinate) {
+                selectMapCoordinate(coordinate);
+            }
+
+            return;
+        }
+
+        if (pickedCoordinate) {
+            centerMapOnCoordinate(pickedCoordinate);
+            return;
+        }
+
+        const coordinate = await getCurrentCoordinate();
+
+        if (coordinate) {
+            selectMapCoordinate(coordinate);
+        }
+    };
+
+    const handleMapRegionChange = () => {
+        if (resolvingAddress) return;
+
+        setMapMessage("Release the map to pick the location under the pin.");
+    };
+
+    const handleMapRegionChangeComplete = (region) => {
+        const coordinate = {
+            latitude: region.latitude,
+            longitude: region.longitude,
+        };
+
+        setMapRegion(region);
+        selectMapCoordinate(coordinate, false);
+        setMapInteracting(false);
     };
 
     const selectCategory = (nextCategory) => {
@@ -555,6 +801,11 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
             setPriority("Hot");
             setVoiceNoteUri(null);
             setVoiceNoteDuration(0);
+            setMapPickerVisible(false);
+            setMapRegion(DEFAULT_MAP_REGION);
+            setPickedCoordinate(null);
+            setMapInteracting(false);
+            setMapMessage("");
             handleClose();
         } catch (error) {
             Alert.alert(
@@ -771,6 +1022,7 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                         keyboardOpeningTime={Platform.OS === "android" ? 0 : 250}
                         enableResetScrollToCoords={false}
                         nestedScrollEnabled={Platform.OS === "android"}
+                        scrollEnabled={!mapInteracting}
                     >
                     {/* Step 1: Basic Project Info */}
                     {currentStep === 0 && (
@@ -904,20 +1156,88 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
 
                             <TouchableOpacity
                                 activeOpacity={0.8}
+                                onPress={openLocationPicker}
+                                disabled={locatingMap || resolvingAddress}
                                 className="h-12 flex-row items-center justify-center rounded-2xl border border-dashed border-[#4A43EC]/30 bg-[#F4F7FF]"
                             >
-                                <Ionicons name="location-outline" size={20} color="#4A43EC" />
+                                <Ionicons
+                                    name={mapPickerVisible ? "locate-outline" : "location-outline"}
+                                    size={20}
+                                    color="#4A43EC"
+                                />
                                 <Text className="ml-2 text-xs font-lato-bold text-[#4A43EC]">
-                                    Pick Location on Map
+                                    {locatingMap
+                                        ? "Detecting Current Location..."
+                                        : mapPickerVisible
+                                          ? "Use Current Location"
+                                          : "Pick Location on Map"}
                                 </Text>
                             </TouchableOpacity>
 
-                            <View className="h-[130px] items-center justify-center rounded-2xl bg-[#F4F7FF]">
-                                <Ionicons name="map-outline" size={48} color="#D1D5DB" />
-                                <Text className="mt-2 text-[13px] text-[#9CA3AF]">
-                                    Map preview will appear here
-                                </Text>
-                            </View>
+                            {mapPickerVisible ? (
+                                <View className="overflow-hidden rounded-2xl border border-gray-100 bg-[#F4F7FF]">
+                                    {Platform.OS === "web" ? (
+                                        <View className="h-[180px] items-center justify-center px-6">
+                                            <Ionicons name="map-outline" size={42} color="#D1D5DB" />
+                                            <Text className="mt-2 text-center text-[13px] text-[#9CA3AF]">
+                                                Map picking is available on the mobile app.
+                                            </Text>
+                                        </View>
+                                    ) : (
+                                        <View className="relative">
+                                            <MapView
+                                                ref={mapRef}
+                                                provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
+                                                initialRegion={mapRegion}
+                                                onRegionChange={handleMapRegionChange}
+                                                onRegionChangeComplete={handleMapRegionChangeComplete}
+                                                onTouchStart={() => setMapInteracting(true)}
+                                                onTouchEnd={() => setMapInteracting(false)}
+                                                onTouchCancel={() => setMapInteracting(false)}
+                                                loadingEnabled
+                                                pitchEnabled={false}
+                                                rotateEnabled={false}
+                                                style={{ height: 240, width: "100%" }}
+                                                showsUserLocation
+                                                showsMyLocationButton
+                                            />
+                                            <View
+                                                pointerEvents="none"
+                                                className="absolute inset-0 items-center justify-center"
+                                            >
+                                                <View className="mb-7 h-11 w-11 items-center justify-center rounded-full bg-white shadow">
+                                                    {resolvingAddress ? (
+                                                        <ActivityIndicator color="#4A43EC" size="small" />
+                                                    ) : (
+                                                        <Ionicons name="location-sharp" size={30} color="#4A43EC" />
+                                                    )}
+                                                </View>
+                                                <View className="h-2 w-2 rounded-full bg-[#4A43EC]/25" />
+                                            </View>
+                                        </View>
+                                    )}
+
+                                    <View className="px-4 py-3">
+                                        <Text className="text-[11px] font-lato text-gray-500">
+                                            {resolvingAddress
+                                                ? "Getting address..."
+                                                : mapMessage || "Move the map to place the pin exactly on the project location."}
+                                        </Text>
+                                        {pickedCoordinate && Platform.OS !== "web" ? (
+                                            <Text className="mt-1 text-[10px] font-lato text-gray-400">
+                                                {formatCoordinateAddress(pickedCoordinate)}
+                                            </Text>
+                                        ) : null}
+                                    </View>
+                                </View>
+                            ) : (
+                                <View className="h-[130px] items-center justify-center rounded-2xl bg-[#F4F7FF]">
+                                    <Ionicons name="map-outline" size={48} color="#D1D5DB" />
+                                    <Text className="mt-2 text-[13px] text-[#9CA3AF]">
+                                        Map preview will appear here
+                                    </Text>
+                                </View>
+                            )}
 
                             <View className="flex-row" style={{ columnGap: 10 }}>
                                 <TouchableOpacity
