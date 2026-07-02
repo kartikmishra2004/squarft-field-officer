@@ -907,6 +907,7 @@ function Overview({ project, onReject }) {
     const hasCompletedFollowUp = (project.followUps || []).some((item) => item.isDone || item.status === "Done");
     const hasCompletedMeeting = (project.meetings || []).some((item) => item.isDone || item.status === "Done");
     const canContinueOnboarding = hasCompletedFollowUp && hasCompletedMeeting;
+    const isOnboardingComplete = project.onboardingProgress >= 100 || project.statusType === "live" || !!project.onboardingData?.completedAt;
     const projectInfo = [
         ["Builder", project.developerName],
         ["Contact Person", project.contactPerson],
@@ -971,15 +972,22 @@ function Overview({ project, onReject }) {
                     </View>
                 ) : null}
                 <View className="mt-3 flex-row" style={{ columnGap: 8 }}>
-                    <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={() => router.push({ pathname: "/onboarding/project-form", params: { projectId: project.id } })}
-                        className="h-10 flex-1 items-center justify-center rounded-[10px] bg-[#4A43EC]"
-                    >
-                        <Text className="text-[12px] font-lato-bold text-white">
-                            {canContinueOnboarding ? "Continue Onboarding >" : "Start onboarding"}
-                        </Text>
-                    </TouchableOpacity>
+                    {isOnboardingComplete ? (
+                        <View className="h-10 flex-1 flex-row items-center justify-center rounded-[10px] bg-[#DCFCE7]">
+                            <Ionicons name="checkmark-circle" size={15} color="#16A34A" />
+                            <Text className="ml-1.5 text-[12px] font-lato-bold text-[#16A34A]">Onboarding Completed</Text>
+                        </View>
+                    ) : (
+                        <TouchableOpacity
+                            activeOpacity={0.85}
+                            onPress={() => router.push({ pathname: "/onboarding/project-form", params: { projectId: project.id } })}
+                            className="h-10 flex-1 items-center justify-center rounded-[10px] bg-[#4A43EC]"
+                        >
+                            <Text className="text-[12px] font-lato-bold text-white">
+                                {canContinueOnboarding ? "Continue Onboarding >" : "Start Onboarding"}
+                            </Text>
+                        </TouchableOpacity>
+                    )}
                     <TouchableOpacity
                         activeOpacity={0.85}
                         onPress={onReject}
@@ -988,7 +996,7 @@ function Overview({ project, onReject }) {
                         <Text className="text-[12px] font-lato-bold text-[#B91C1C]">Reject Lead</Text>
                     </TouchableOpacity>
                 </View>
-                {!canContinueOnboarding ? (
+                {!isOnboardingComplete && !canContinueOnboarding ? (
                     <Text className="mt-2 text-center text-[10px] text-[#64748B]">
                         (At least 1 follow-up and 1 meeting is recommended but you can continue without them)
                     </Text>

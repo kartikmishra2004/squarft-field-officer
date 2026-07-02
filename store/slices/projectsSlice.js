@@ -302,6 +302,7 @@ const projectsSlice = createSlice({
             if (project) {
                 project.onboardingDraft = {
                     ...draft,
+                    projectId: draft.projectId || project.onboardingDraft?.projectId || null,
                     updatedAt: new Date().toISOString(),
                 };
             }

@@ -13,9 +13,11 @@ import {
     Pressable,
     Keyboard,
     TouchableWithoutFeedback,
+    Modal,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { Stack, router, useLocalSearchParams } from "expo-router";
+import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { useDispatch, useSelector } from "react-redux";
@@ -38,7 +40,7 @@ import {
 } from "../../store/slices/projectSlice";
 import { completeProjectOnboarding, saveProjectOnboardingDraft, selectProjectById } from "../../store/slices/projectsSlice";
 import { addNotification } from "../../store/slices/notificationSlice";
-import { projectFormApi } from "../../services/api";
+import { projectFormApi, leadsAPI } from "../../services/api";
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
@@ -151,6 +153,9 @@ export default function AddProject() {
         if (existingProject?.onboardingDraft?.form) {
             dispatch(bulkUploadProject(existingProject.onboardingDraft.form));
             dispatch(setStep(existingProject.onboardingDraft.currentStep || 2));
+            // Draft already exists — projectId was set when draft was created, keep it
+            dispatch(setProjectId(existingProject.onboardingDraft.projectId || leadProjectId));
+            setDraftReady(true);
         } else if (existingProject) {
             dispatch(
                 updateStep1({
@@ -163,12 +168,43 @@ export default function AddProject() {
                     responsiblePersonContact: existingProject.phoneNumber || "",
                 }),
             );
-            dispatch(setStep(2));
+            dispatch(setStep(1));
+            // No projectId yet — createDraft will set it
+            setDraftReady(true);
+        } else if (leadProjectId) {
+            // Not in Redux — fetch from backend API and prefill step 1
+            leadsAPI.getLeadDetails(leadProjectId)
+                .then((res) => {
+                    const lead = res?.data?.lead || res?.data || res;
+                    if (lead) {
+                        dispatch(
+                            updateStep1({
+                                projectName: lead.project_name || lead.projectName || "",
+                                location: lead.full_address || lead.area || lead.location || "",
+                                city: lead.city || "",
+                                state: lead.state || "",
+                                pincode: lead.pincode || "",
+                                salesOfficerName: lead.contact_person || "",
+                                salesOfficerContact: (lead.contact_number || lead.phoneNumber || "").replace(/^\+91/, ""),
+                                responsiblePersonName: lead.builder_name || lead.contact_person || "",
+                                responsiblePersonContact: (lead.contact_number || lead.phoneNumber || "").replace(/^\+91/, ""),
+                            }),
+                        );
+                    }
+                    dispatch(setStep(1));
+                })
+                .catch(() => {
+                    dispatch(setStep(1));
+                })
+                .finally(() => {
+                    // Do NOT set projectId here — it must come from createDraft API response
+                    setDraftReady(true);
+                });
         } else {
-            dispatch(setStep(2));
+            dispatch(setStep(1));
+            // Do NOT pre-set projectId — createDraft will assign it
+            setDraftReady(true);
         }
-        dispatch(setProjectId(leadProjectId || `onboarding-${Date.now()}`));
-        setDraftReady(true);
     }, [dispatch, leadProjectId]);
 
     const validateStep1Fields = (values) => {
@@ -231,9 +267,10 @@ export default function AddProject() {
 
         dispatch(
             saveProjectOnboardingDraft({
-                projectId,
+                projectId: leadProjectId || projectId,
                 draft: {
                     currentStep,
+                    projectId,
                     form: {
                         step1,
                         step2,
@@ -401,33 +438,52 @@ export default function AddProject() {
                 if (!projectId || !shouldUseProjectFormApi) { dispatch(setStep(5)); return; }
                 try {
                     setIsSubmitting(true);
-                    const approvals = {
-                        tncp: {
-                            is_approved: step4.approvals.tncp.status === 'Yes',
-                            expected_time: step4.approvals.tncp.expectedTime || null,
-                        },
-                        municipal: {
-                            is_approved: step4.approvals.buildingPermission.status === 'Yes',
-                            expected_time: step4.approvals.buildingPermission.expectedTime || null,
-                        },
-                        rera: {
-                            is_approved: step4.approvals.rera.status === 'Yes',
-                            rera_id: step4.approvals.rera.registrationNumber || null,
-                            expected_time: step4.approvals.rera.expectedTime || null,
-                        },
-                        bank_loan: {
+                    const mapApproval = (status, expectedTime) => {
+                        if (!status) return undefined; // skip if not filled
+                        return {
+                            is_approved: status === 'Yes',
+                            expected_time: status === 'Yes' ? null : (expectedTime || null),
+                        };
+                    };
+                    const buildApprovals = () => {
+                        const obj = {};
+                        const tncp = mapApproval(step4.approvals.tncp.status, step4.approvals.tncp.expectedTime);
+                        const municipal = mapApproval(step4.approvals.buildingPermission.status, step4.approvals.buildingPermission.expectedTime);
+                        const diversion = mapApproval(step4.approvals.diversion.status, step4.approvals.diversion.expectedTime);
+                        const devPerm = mapApproval(step4.approvals.developmentPermission.status, step4.approvals.developmentPermission.expectedTime);
+                        const reraStatus = step4.approvals.rera.status;
+                        if (tncp) obj.tncp = tncp;
+                        if (municipal) obj.municipal = municipal;
+                        if (diversion) obj.diversion = diversion;
+                        if (devPerm) obj.developmentPermission = devPerm;
+                        if (reraStatus) {
+                            obj.rera = {
+                                is_approved: reraStatus === 'Yes',
+                                rera_id: reraStatus === 'Yes' ? (step4.approvals.rera.registrationNumber || null) : null,
+                                expected_time: reraStatus === 'Yes' ? null : (step4.approvals.rera.expectedTime || null),
+                            };
+                        }
+                        obj.bank_loan = {
                             is_approved: step5.loanAvailable === 'Yes',
                             banks: step5.tieUpBankName || step5.bankNameList || null,
-                        },
+                        };
+                        return obj;
                     };
                     await projectFormApi.finalizeStep4(projectId, {
                         possession_status: step4.possessionStatus || null,
+                        possession_remarks: step4.possessionRemarks || null,
+                        project_launch_status: step4.projectLaunchStatus || null,
+                        project_launch_date: step4.projectLaunchDate || null,
+                        expected_launch_date: step4.expectedLaunchDate || null,
                         development_progress: parseInt(step4.developmentCompletionPercentage) || 0,
                         development_checklist: step4.currentDevelopmentStage || [],
+                        development_remarks: step4.developmentRemarks || null,
+                        other_development_stage: step4.otherDevelopmentStage || null,
+                        overall_approval_status: step4.overallApprovalStatus || null,
                         variant_possessions: [],
                         amenity_ids: [],
                         bank_account: null,
-                        approvals,
+                        approvals: buildApprovals(),
                     });
                     dispatch(setStep(5));
                 } catch (error) {
@@ -2552,6 +2608,93 @@ const FormSection = ({ title, children }) => (
     </View>
 );
 
+const formatDateDisplay = (dateStr) => {
+    if (!dateStr) return "";
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
+
+const DatePickerField = ({ label, value, fieldKey, pickerVisible, setPickerVisible, onDateChange, minDate, maxDate }) => {
+    const isOpen = pickerVisible === fieldKey;
+    const dateValue = value ? new Date(value) : new Date();
+
+    const handleChange = (event, selectedDate) => {
+        if (Platform.OS === "android") {
+            setPickerVisible(null);
+            if (event.type === "set" && selectedDate) {
+                onDateChange(selectedDate.toISOString().split("T")[0]);
+            }
+            return;
+        }
+        if (selectedDate) {
+            onDateChange(selectedDate.toISOString().split("T")[0]);
+        }
+    };
+
+    const openPicker = () => {
+        if (Platform.OS === "android") {
+            DateTimePickerAndroid.open({
+                value: dateValue,
+                mode: "date",
+                minimumDate: minDate,
+                maximumDate: maxDate,
+                onChange: handleChange,
+            });
+        } else {
+            setPickerVisible(isOpen ? null : fieldKey);
+        }
+    };
+
+    return (
+        <View>
+            <Text className="text-xs font-lato-bold text-black mb-1.5">{label}</Text>
+            <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={openPicker}
+                className="bg-white border border-gray-200 rounded-xl px-4 h-12 flex-row items-center justify-between"
+            >
+                <Text className={`text-[13px] font-lato-medium ${value ? "text-gray-800" : "text-gray-400"}`}>
+                    {value ? formatDateDisplay(value) : `Select ${label.toLowerCase()}`}
+                </Text>
+                <Ionicons name="calendar-outline" size={18} color="#4A43EC" />
+            </TouchableOpacity>
+            {Platform.OS === "ios" && isOpen && (
+                <Modal transparent animationType="fade" onRequestClose={() => setPickerVisible(null)}>
+                    <TouchableOpacity
+                        style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "flex-end" }}
+                        activeOpacity={1}
+                        onPress={() => setPickerVisible(null)}
+                    >
+                        <View style={{ backgroundColor: "#fff", borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingHorizontal: 16, paddingBottom: 24, paddingTop: 12 }}>
+                            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                                <TouchableOpacity onPress={() => setPickerVisible(null)}>
+                                    <Text style={{ fontSize: 13, color: "#64748B", fontWeight: "600" }}>Cancel</Text>
+                                </TouchableOpacity>
+                                <Text style={{ fontSize: 14, fontWeight: "700", color: "#111827" }}>{label}</Text>
+                                <TouchableOpacity onPress={() => setPickerVisible(null)}>
+                                    <Text style={{ fontSize: 13, color: "#4A43EC", fontWeight: "700" }}>Done</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <DateTimePicker
+                                value={dateValue}
+                                mode="date"
+                                display="spinner"
+                                minimumDate={minDate}
+                                maximumDate={maxDate}
+                                textColor="#111827"
+                                themeVariant="light"
+                                accentColor="#4A43EC"
+                                onChange={handleChange}
+                            />
+                        </View>
+                    </TouchableOpacity>
+                </Modal>
+            )}
+        </View>
+    );
+};
+
 const OptionGroup = ({ label, options, value, onChange }) => (
     <View>
         {label ? <Text className="text-xs font-lato-bold text-black mb-2">{label}</Text> : null}
@@ -2696,6 +2839,8 @@ const DocumentUploadButton = ({ label, documents, onDocumentsPicked }) => {
     );
 };
 
+const EXPECTED_TIME_OPTIONS = ["3 months", "6 months", "9 months", "12 months", "18 months", "24 months", "24+ months"];
+
 function ApprovalBlock({ title, approvalKey, options = APPROVAL_STATUS_OPTIONS, fields }) {
     const dispatch = useDispatch();
     const approval = useSelector((state) => state.project.step4.approvals[approvalKey]);
@@ -2733,15 +2878,36 @@ function ApprovalBlock({ title, approvalKey, options = APPROVAL_STATUS_OPTIONS, 
 
             {approval.status === "No" && (
                 <View className="gap-4">
-                    {fields.no.map(field => (
-                        <FieldInput
-                            key={field.key}
-                            label={field.label}
-                            placeholder={field.placeholder}
-                            value={approval[field.key]}
-                            onChangeText={(value) => updateApproval({ [field.key]: value })}
-                        />
-                    ))}
+                    {fields.no.map(field =>
+                        field.key === "expectedTime" ? (
+                            <View key={field.key}>
+                                <Text className="text-xs font-lato-bold text-black mb-2">{field.label}</Text>
+                                <View className="flex-row flex-wrap gap-2">
+                                    {EXPECTED_TIME_OPTIONS.map(opt => {
+                                        const active = approval.expectedTime === opt;
+                                        return (
+                                            <TouchableOpacity
+                                                key={opt}
+                                                activeOpacity={0.75}
+                                                onPress={() => updateApproval({ expectedTime: opt })}
+                                                className={`px-3 h-8 rounded-lg border items-center justify-center ${active ? "bg-[#4A43EC] border-[#4A43EC]" : "bg-white border-gray-200"}`}
+                                            >
+                                                <Text className={`text-[12px] font-lato-medium ${active ? "text-white" : "text-gray-700"}`}>{opt}</Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            </View>
+                        ) : (
+                            <FieldInput
+                                key={field.key}
+                                label={field.label}
+                                placeholder={field.placeholder}
+                                value={approval[field.key]}
+                                onChangeText={(value) => updateApproval({ [field.key]: value })}
+                            />
+                        )
+                    )}
                 </View>
             )}
         </View>
@@ -2752,6 +2918,7 @@ function Step4() {
     const dispatch = useDispatch();
     const { step4 } = useSelector((state) => state.project);
     const updateField = (field, value) => dispatch(updateStep4({ [field]: value }));
+    const [pickerVisible, setPickerVisible] = useState(null); // which field is open
 
     const normalizedApprovalStatuses = [
         step4.approvals.diversion.status,
@@ -2781,11 +2948,13 @@ function Step4() {
                     onChange={(value) => updateField("possessionStatus", value)}
                 />
                 {step4.possessionStatus === "Possession Pending" && (
-                    <FieldInput
+                    <DatePickerField
                         label="Expected Possession Date"
-                        placeholder="Select expected possession date"
                         value={step4.expectedPossessionDate}
-                        onChangeText={(value) => updateField("expectedPossessionDate", value)}
+                        fieldKey="expectedPossessionDate"
+                        pickerVisible={pickerVisible}
+                        setPickerVisible={setPickerVisible}
+                        onDateChange={(value) => updateField("expectedPossessionDate", value)}
                     />
                 )}
                 <FieldInput
@@ -2804,19 +2973,25 @@ function Step4() {
                     onChange={(value) => updateField("projectLaunchStatus", value)}
                 />
                 {step4.projectLaunchStatus === "Already Launched" && (
-                    <FieldInput
+                    <DatePickerField
                         label="Project Launch Date"
-                        placeholder="Select project launch date"
                         value={step4.projectLaunchDate}
-                        onChangeText={(value) => updateField("projectLaunchDate", value)}
+                        fieldKey="projectLaunchDate"
+                        pickerVisible={pickerVisible}
+                        setPickerVisible={setPickerVisible}
+                        onDateChange={(value) => updateField("projectLaunchDate", value)}
+                        maxDate={new Date()}
                     />
                 )}
                 {step4.projectLaunchStatus === "Upcoming Launch" && (
-                    <FieldInput
+                    <DatePickerField
                         label="Expected Launch Date"
-                        placeholder="Select expected launch date"
                         value={step4.expectedLaunchDate}
-                        onChangeText={(value) => updateField("expectedLaunchDate", value)}
+                        fieldKey="expectedLaunchDate"
+                        pickerVisible={pickerVisible}
+                        setPickerVisible={setPickerVisible}
+                        onDateChange={(value) => updateField("expectedLaunchDate", value)}
+                        minDate={new Date()}
                     />
                 )}
             </FormSection>

@@ -177,4 +177,50 @@ export const leadsAPI = {
   },
 };
 
+export const projectFormApi = {
+  // Step 1 — create draft project
+  createDraft: (payload) => api.post('/api/v1/project-panel/form/draft', payload),
+
+  // Step 2 — configure property types
+  configurePropertyTypes: (projectId, payload) =>
+    api.put(`/api/v1/project-panel/form/${projectId}/property-types`, payload),
+
+  // Step 3 — create variant blueprint
+  createVariant: (projectId, payload) =>
+    api.post(`/api/v1/project-panel/form/${projectId}/variants`, payload),
+
+  // Step 3 — sync grid units
+  syncGridUnits: (projectId, payload) =>
+    api.post(`/api/v1/project-panel/form/${projectId}/units/sync`, payload),
+
+  // Step 3 — bulk CSV upload
+  uploadCsvUnits: (projectId, formData) =>
+    api.post(`/api/v1/project-panel/form/${projectId}/units/upload-csv`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+
+  // Step 4 — approvals & possession
+  finalizeStep4: (projectId, payload) =>
+    api.put(`/api/v1/project-panel/form/${projectId}/step4-finalize`, payload),
+
+  // Step 5 — commercial & legal
+  finalizeStep5: (projectId, payload) =>
+    api.put(`/api/v1/project-panel/form/${projectId}/step5-finalize`, payload),
+
+  // Step 6 — media upload (single file multipart)
+  uploadMedia: (projectId, formData) =>
+    api.post(`/api/v1/project-panel/form/${projectId}/media`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000,
+    }),
+
+  // Step 6 — finalize & publish
+  finalizeStep6: (projectId, payload) =>
+    api.put(`/api/v1/project-panel/form/${projectId}/step6-finalize`, payload),
+
+  // Restore draft step data (variants + units)
+  getStepData: (projectId) =>
+    api.get(`/api/v1/project-panel/form/${projectId}/step-data`),
+};
+
 export default api;
