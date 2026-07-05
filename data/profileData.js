@@ -20,8 +20,6 @@ export const performanceStats = [
 ];
 
 export const profileLinks = [
-    { label: "Submit Daily Report", icon: "document-text-outline" },
     { label: "Map View - Nearby Projects", icon: "map-outline" },
-    { label: "Notification Settings", icon: "notifications-outline" },
     { label: "Help & Support", icon: "help-circle-outline" },
 ];
