@@ -17,7 +17,7 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    console.log("API request", { method: config.method, url: config.url });
+    console.log("API request", { method: config.method, url: config.url, baseURL: config.baseURL || API_BASE_URL });
     return config;
   },
   (error) => Promise.reject(error)
@@ -196,7 +196,8 @@ export const projectFormApi = {
   // Step 3 — bulk CSV upload
   uploadCsvUnits: (projectId, formData) =>
     api.post(`/api/v1/project-panel/form/${projectId}/units/upload-csv`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000,
+      transformRequest: (data) => data,
     }),
 
   // Step 4 — approvals & possession
@@ -208,11 +209,27 @@ export const projectFormApi = {
     api.put(`/api/v1/project-panel/form/${projectId}/step5-finalize`, payload),
 
   // Step 6 — media upload (single file multipart)
-  uploadMedia: (projectId, formData) =>
-    api.post(`/api/v1/project-panel/form/${projectId}/media`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 30000,
-    }),
+  // Using XMLHttpRequest directly — axios has known issues with binary FormData in React Native
+  uploadMedia: async (projectId, formData) => {
+    const token = await AsyncStorage.getItem('authToken');
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE_URL}/api/v1/project-panel/form/${projectId}/media`);
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.timeout = 60000;
+      xhr.onload = () => {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          resolve({ data });
+        } catch {
+          resolve({ data: xhr.responseText });
+        }
+      };
+      xhr.onerror = () => reject(new Error('Network Error'));
+      xhr.ontimeout = () => reject(new Error('Upload timed out'));
+      xhr.send(formData);
+    });
+  },
 
   // Step 6 — finalize & publish
   finalizeStep6: (projectId, payload) =>
@@ -221,6 +238,14 @@ export const projectFormApi = {
   // Restore draft step data (variants + units)
   getStepData: (projectId) =>
     api.get(`/api/v1/project-panel/form/${projectId}/step-data`),
+
+  // Full resume — restores all steps for a draft
+  getProjectFormResume: (projectId) =>
+    api.get(`/api/v1/project-panel/form/${projectId}/resume`),
+
+  // List all draft projects for current user
+  getDraftProjects: () =>
+    api.get('/api/v1/project-panel/form/drafts'),
 };
 
 export default api;

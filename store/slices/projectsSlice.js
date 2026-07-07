@@ -1,4 +1,4 @@
-import { createSlice } from "@reduxjs/toolkit";
+import { createSelector, createSlice } from "@reduxjs/toolkit";
 const onboardingStages = [
     "New Lead Added",
     "First Contact",
@@ -322,8 +322,12 @@ export const {
 } = projectsSlice.actions;
 export const selectProjects = (state) => state.projects.items;
 export const selectProjectById = (state, projectId) => state.projects.items.find((project) => project.id === projectId);
-export const selectAllProjectFollowUps = (state) =>
-    state.projects.items.flatMap((project) => (project.followUps || []).map((item) => ({ ...item, projectId: project.id })));
-export const selectAllProjectMeetings = (state) =>
-    state.projects.items.flatMap((project) => (project.meetings || []).map((item) => ({ ...item, projectId: project.id })));
+export const selectAllProjectFollowUps = createSelector(
+    selectProjects,
+    (items) => items.flatMap((project) => (project.followUps || []).map((item) => ({ ...item, projectId: project.id })))
+);
+export const selectAllProjectMeetings = createSelector(
+    selectProjects,
+    (items) => items.flatMap((project) => (project.meetings || []).map((item) => ({ ...item, projectId: project.id })))
+);
 export default projectsSlice.reducer;

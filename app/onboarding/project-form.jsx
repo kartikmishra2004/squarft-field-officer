@@ -172,32 +172,44 @@ export default function AddProject() {
             // No projectId yet — createDraft will set it
             setDraftReady(true);
         } else if (leadProjectId) {
-            // Not in Redux — fetch from backend API and prefill step 1
+            // First fetch lead details — it may have a linked project_id
             leadsAPI.getLeadDetails(leadProjectId)
-                .then((res) => {
+                .then(async (res) => {
                     const lead = res?.data?.lead || res?.data || res;
-                    if (lead) {
-                        dispatch(
-                            updateStep1({
-                                projectName: lead.project_name || lead.projectName || "",
-                                location: lead.full_address || lead.area || lead.location || "",
-                                city: lead.city || "",
-                                state: lead.state || "",
-                                pincode: lead.pincode || "",
-                                salesOfficerName: lead.contact_person || "",
-                                salesOfficerContact: (lead.contact_number || lead.phoneNumber || "").replace(/^\+91/, ""),
-                                responsiblePersonName: lead.builder_name || lead.contact_person || "",
-                                responsiblePersonContact: (lead.contact_number || lead.phoneNumber || "").replace(/^\+91/, ""),
-                            }),
-                        );
+                    const linkedProjectId = lead?.project_id;
+
+                    if (linkedProjectId) {
+                        // Lead already has a linked project — resume it
+                        try {
+                            await resumeDraft(linkedProjectId);
+                        } catch (e) {
+                            console.warn("resumeDraft failed, falling back to step1", e);
+                            dispatch(setStep(1));
+                            setDraftReady(true);
+                        }
+                    } else {
+                        // No project yet — prefill step1 from lead details
+                        if (lead) {
+                            dispatch(
+                                updateStep1({
+                                    projectName: lead.project_name || lead.projectName || "",
+                                    location: lead.full_address || lead.area || lead.location || "",
+                                    city: lead.city || "",
+                                    state: lead.state || "",
+                                    pincode: lead.pincode || "",
+                                    salesOfficerName: lead.contact_person || "",
+                                    salesOfficerContact: (lead.contact_number || lead.phoneNumber || "").replace(/^\+91/, ""),
+                                    responsiblePersonName: lead.builder_name || lead.contact_person || "",
+                                    responsiblePersonContact: (lead.contact_number || lead.phoneNumber || "").replace(/^\+91/, ""),
+                                }),
+                            );
+                        }
+                        dispatch(setStep(1));
+                        setDraftReady(true);
                     }
-                    dispatch(setStep(1));
                 })
                 .catch(() => {
                     dispatch(setStep(1));
-                })
-                .finally(() => {
-                    // Do NOT set projectId here — it must come from createDraft API response
                     setDraftReady(true);
                 });
         } else {
@@ -262,6 +274,387 @@ export default function AddProject() {
         completedAt: new Date().toISOString(),
     });
 
+    const normalizeImageSource = (value) => {
+        if (!value) return null;
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            return trimmed ? { uri: trimmed } : null;
+        }
+        if (typeof value === 'object') {
+            if (typeof value.uri === 'string' && value.uri.trim()) return { uri: value.uri.trim() };
+            if (typeof value.url === 'string' && value.url.trim()) return { uri: value.url.trim() };
+            if (typeof value.path === 'string' && value.path.trim()) return { uri: value.path.trim() };
+        }
+        return null;
+    };
+
+    const normalizeImageList = (value) => {
+        if (!value) return [];
+        if (Array.isArray(value)) {
+            return value.map(normalizeImageSource).filter(Boolean).map(i => i.uri);
+        }
+        const n = normalizeImageSource(value);
+        return n ? [n.uri] : [];
+    };
+
+    const resumeDraft = async (projectIdToResume) => {
+        dispatch(resetForm());
+        dispatch(setProjectId(projectIdToResume));
+
+        try {
+            const res = await projectFormApi.getProjectFormResume(projectIdToResume);
+            const resumeData = res.data?.data;
+            if (!resumeData) throw new Error("Empty resume data");
+
+            const s1 = resumeData.step1 || {};
+            const s2 = resumeData.step2 || {};
+            const s4 = resumeData.step4 || {};
+            const s5 = resumeData.step5 || {};
+
+            // Step 1
+            dispatch(updateStep1({
+                projectName: s1.name || '',
+                location: s1.location || '',
+                city: s1.city || '',
+                state: s1.state || '',
+                pincode: s1.pincode || '',
+                salesOfficerName: s1.sales_officer_name || '',
+                salesOfficerContact: s1.sales_officer_contact || '',
+                responsiblePersonName: s1.responsible_person_name || '',
+                responsiblePersonContact: s1.responsible_person_contact || '',
+            }));
+
+            // Step 2 — deduplicated property types from variants
+            const variants = resumeData.step3?.variants || [];
+            const dbUnits  = resumeData.step3?.units    || [];
+            const seen = new Set();
+            const typeMap = {};
+
+            variants.forEach((v) => {
+                const mainType = v.property_type === 'commercial' ? 'commercial' : 'residential';
+                const subType  = v.property_subtype;
+                const key      = `${mainType}_${subType}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    dispatch(addPropertyType({ id: `resume_${mainType}_${subType}`, mainType, subType }));
+                    typeMap[subType] = { mainType, subType, typeId: `resume_${mainType}_${subType}` };
+                }
+            });
+
+            if (variants.length === 0) {
+                (s2.property_types || []).forEach((pt) => {
+                    const key = `${pt.main_type}_${pt.sub_type}`;
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        dispatch(addPropertyType({ id: `resume_${pt.main_type}_${pt.sub_type}`, mainType: pt.main_type, subType: pt.sub_type }));
+                        typeMap[pt.sub_type] = { mainType: pt.main_type, subType: pt.sub_type, typeId: `resume_${pt.main_type}_${pt.sub_type}` };
+                    }
+                });
+            }
+
+            // Step 3 — rebuild unitConfigs from saved units + variants
+            const variantById = {};
+            variants.forEach((v) => { variantById[v.id] = v; });
+
+            const unitsBySubType = {};
+            dbUnits.forEach((u) => {
+                const variant = variantById[u.property_id];
+                if (!variant) return;
+                const subType = variant.property_subtype;
+                if (!unitsBySubType[subType]) unitsBySubType[subType] = [];
+                unitsBySubType[subType].push({ unit: u, variant });
+            });
+
+            const parseJsonField = (val) => {
+                if (Array.isArray(val)) return val;
+                try { return JSON.parse(val || '[]'); } catch { return []; }
+            };
+
+            const buildUnitConfig = (unit, variant) => {
+                const bhkLabel = variant.category_type || (variant.bedrooms ? `${variant.bedrooms} BHK` : variant.property_subtype);
+                return {
+                    tower:          unit?.block_name || '',
+                    floor:          unit?.floor != null ? String(unit.floor) : '',
+                    bhk:            bhkLabel,
+                    officeType:     bhkLabel,
+                    variantName:    variant.variant_name || '',
+                    area:           variant.area_sqft != null ? String(variant.area_sqft) : '',
+                    areaUnit:       variant.area_unit || unit?.area_unit || 'Sq-ft',
+                    price:          variant.selling_price != null ? String(variant.selling_price) : '',
+                    images:         normalizeImageList(variant.images),
+                    amenities:      parseJsonField(variant.amenities).length > 0 ? parseJsonField(variant.amenities) : [''],
+                    extraCharges:   parseJsonField(variant.extra_charges).length > 0 ? parseJsonField(variant.extra_charges) : [{ title: '', amount: '' }],
+                    brochure:       variant.brochure_url ? { uri: variant.brochure_url, name: 'Brochure', mimeType: '', size: 0 } : null,
+                    propertyNumber: unit?.unit_number || '',
+                    hasShop:        false,
+                };
+            };
+
+            const RESUME_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#6366F1', '#14B8A6'];
+
+            const parseFloorNum = (floorVal, fallback) => {
+                if (floorVal == null) return fallback;
+                const n = parseInt(String(floorVal).replace(/\D/g, ''), 10);
+                return isNaN(n) ? fallback : n;
+            };
+
+            const buildBuilderState = (subType, entries) => {
+                const sectionMap = {};
+                const sectionOrder = [];
+                entries.forEach(({ unit, variant }) => {
+                    const sec = unit?.block_name || 'Block A';
+                    if (!sectionMap[sec]) { sectionMap[sec] = []; sectionOrder.push(sec); }
+                    sectionMap[sec].push({ unit, variant });
+                });
+
+                const sections = sectionOrder.map((secName, secIdx) => {
+                    const sEntries = sectionMap[secName];
+                    const variantToConfigId = {};
+                    const configs = [];
+                    sEntries.forEach(({ variant }) => {
+                        if (!variantToConfigId[variant.id]) {
+                            const cfgId = 'cfg_' + variant.id;
+                            variantToConfigId[variant.id] = cfgId;
+                            configs.push({
+                                id: cfgId,
+                                type: variant.category_type || variant.property_subtype || '',
+                                name: variant.variant_name || '',
+                                area: variant.area_sqft != null ? String(variant.area_sqft) : '',
+                                areaUnit: variant.area_unit || 'Sq-ft',
+                                price: variant.selling_price != null ? String(variant.selling_price) : '',
+                                color: RESUME_COLORS[configs.length % RESUME_COLORS.length],
+                                images: normalizeImageList(variant.images),
+                                brochure: variant.brochure_url ? { uri: variant.brochure_url, name: 'Brochure', mimeType: '', size: 0 } : null,
+                                amenities: parseJsonField(variant.amenities).filter(Boolean).length > 0
+                                    ? parseJsonField(variant.amenities).filter(Boolean) : [''],
+                            });
+                        }
+                    });
+
+                    const floorGroups = {};
+                    sEntries.forEach(({ unit, variant }, idx) => {
+                        const floor = parseFloorNum(unit?.floor, idx + 1);
+                        if (!floorGroups[floor]) floorGroups[floor] = [];
+                        floorGroups[floor].push({ unit, variant });
+                    });
+
+                    const builderMeta = sEntries[0]?.variant?.builder_meta;
+                    const savedUnitsPerFloor = (builderMeta && typeof builderMeta === 'object')
+                        ? builderMeta.units_per_floor
+                        : (typeof builderMeta === 'string' ? JSON.parse(builderMeta || '{}')?.units_per_floor : null);
+                    const allFloors = Object.keys(floorGroups).map(Number).filter(n => !isNaN(n));
+                    const savedFloors = sEntries[0]?.variant?.section_floors;
+                    const maxPaintedFloor = allFloors.length > 0 ? Math.max(...allFloors) : sEntries.length;
+                    const floorCount = savedFloors || maxPaintedFloor;
+                    const maxPaintedPerFloor = Object.values(floorGroups).length > 0
+                        ? Math.max(...Object.values(floorGroups).map(g => g.length), 1) : 1;
+                    const maxCol = savedUnitsPerFloor || maxPaintedPerFloor;
+
+                    const rowUnitCounts = {};
+                    const unitMap = {};
+                    const unitOverrides = {};
+                    for (let row = 1; row <= floorCount; row++) {
+                        rowUnitCounts[row] = maxCol;
+                    }
+
+                    // First pass: populate assigned cells from DB entries
+                    // Derive column position from unit_number (e.g. "103" on floor 1 → col 3)
+                    allFloors.forEach((floor) => {
+                        floorGroups[floor].forEach(({ unit, variant }, colIdx) => {
+                            let col = colIdx + 1; // fallback
+                            if (unit?.unit_number) {
+                                const numStr = String(unit.unit_number);
+                                const floorStr = String(floor);
+                                // unit_number like "103": strip floor prefix to get col
+                                if (numStr.startsWith(floorStr)) {
+                                    const colPart = parseInt(numStr.slice(floorStr.length), 10);
+                                    if (!isNaN(colPart) && colPart > 0) col = colPart;
+                                }
+                            }
+                            const key = `${floor}_${col}`;
+                            unitMap[key] = variantToConfigId[variant.id];
+                            if (unit?.unit_number) unitOverrides[key] = { customName: unit.unit_number };
+                        });
+                    });
+
+                    // Second pass: fill unitOverrides for ALL cells that don't have one yet
+                    // so unassigned cells still show their room number (e.g. 101, 102, 104...)
+                    for (let row = 1; row <= floorCount; row++) {
+                        for (let col = 1; col <= maxCol; col++) {
+                            const key = `${row}_${col}`;
+                            if (!unitOverrides[key]) {
+                                // Generate room number: floor prefix + zero-padded col (101, 102, 110, 201...)
+                                const colStr = col < 10 ? `0${col}` : `${col}`;
+                                unitOverrides[key] = { customName: `${row}${colStr}` };
+                            }
+                        }
+                    }
+
+                    return {
+                        id: secIdx + 1,
+                        name: secName,
+                        floors: floorCount, rows: floorCount, lanes: floorCount,
+                        unitsPerFloor: maxCol, plotsPerRow: maxCol, villasPerLane: maxCol,
+                        configs, unitMap, rowUnitCounts, unitOverrides,
+                    };
+                });
+
+                const getDefaultBuilderStateFallback = (subType2) => {
+                    const secName2 = RANGE_BASED_SUB_TYPES.has(subType2) ? 'A' : subType2 === 'apartment' ? 'Tower A' : 'Section 1';
+                    const rCount = subType2 === 'apartment' ? 8 : 4;
+                    const cCount = subType2 === 'apartment' ? 4 : 6;
+                    return { sections: [{ id: 1, name: secName2, floors: rCount, rows: rCount, lanes: rCount, unitsPerFloor: cCount, plotsPerRow: cCount, villasPerLane: cCount, configs: [], unitMap: {}, rowUnitCounts: {}, unitOverrides: {} }], activeSectionId: 1, activeConfigId: null, gridMode: 'paint', selectedUnitKey: null };
+                };
+
+                const finalSections = sections.length > 0 ? sections : getDefaultBuilderStateFallback(subType).sections;
+                return { sections: finalSections, activeSectionId: finalSections[0]?.id || 1, activeConfigId: finalSections[0]?.configs[0]?.id || null, gridMode: 'paint', selectedUnitKey: null };
+            };
+
+            Object.entries(unitsBySubType).forEach(([subType, entries]) => {
+                const typeId = `resume_${typeMap[subType]?.mainType || 'residential'}_${subType}`;
+                const unitConfigs = entries.map(({ unit, variant }) => buildUnitConfig(unit, variant));
+                dispatch(bulkUploadSubtype({ typeId, unitConfigs }));
+                dispatch(setUploadMode({ typeId, mode: 'bulk' }));
+                dispatch(updateBuilderData({ typeId, subType, builderState: buildBuilderState(subType, entries) }));
+            });
+
+            variants.forEach((v) => {
+                const subType = v.property_subtype;
+                if (!unitsBySubType[subType]) {
+                    const mainType = v.property_type === 'commercial' ? 'commercial' : 'residential';
+                    const typeId = `resume_${mainType}_${subType}`;
+                    const unitConfigs = [buildUnitConfig(null, v)];
+                    dispatch(bulkUploadSubtype({ typeId, unitConfigs }));
+                    dispatch(setUploadMode({ typeId, mode: 'bulk' }));
+                    dispatch(updateBuilderData({ typeId, subType, builderState: buildBuilderState(subType, [{ unit: null, variant: v }]) }));
+                }
+            });
+
+            // Step 4
+            if (s4.possession_status || s4.project_launch_status || s4.development_progress != null || s4.overall_approval_status) {
+                const parseChecklist = (val) => {
+                    if (Array.isArray(val)) return val;
+                    try { return JSON.parse(val || '[]'); } catch { return []; }
+                };
+                dispatch(updateStep4({
+                    possessionStatus: s4.possession_status ? s4.possession_status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '',
+                    possessionRemarks: s4.possession_remarks || '',
+                    projectLaunchStatus: s4.project_launch_status || '',
+                    projectLaunchDate: s4.project_launch_date || '',
+                    expectedLaunchDate: s4.expected_launch_date || '',
+                    developmentCompletionPercentage: s4.development_progress != null ? String(s4.development_progress) : '',
+                    currentDevelopmentStage: parseChecklist(s4.development_checklist),
+                    developmentRemarks: s4.development_remarks || '',
+                    otherDevelopmentStage: s4.other_development_stage || '',
+                    overallApprovalStatus: s4.overall_approval_status || 'Not verified yet',
+                }));
+
+                const approvals = s4.approvals || {};
+                const resolveApprovalStatus = (ap) => {
+                    if (!ap) return '';
+                    if (ap.is_approved === true) return 'Yes';
+                    if (ap.is_approved === false && ap.expected_time) return 'No';
+                    return '';
+                };
+
+                if (approvals.tncp) dispatch(updateStep4Approval({ approvalKey: 'tncp', data: { status: resolveApprovalStatus(approvals.tncp), expectedTime: approvals.tncp.expected_time || '' } }));
+                if (approvals.municipal) dispatch(updateStep4Approval({ approvalKey: 'buildingPermission', data: { status: resolveApprovalStatus(approvals.municipal), expectedTime: approvals.municipal.expected_time || '' } }));
+                if (approvals.rera) dispatch(updateStep4Approval({ approvalKey: 'rera', data: { status: resolveApprovalStatus(approvals.rera), registrationNumber: approvals.rera.rera_id || '', expectedTime: approvals.rera.expected_time || '' } }));
+                if (approvals.diversion) dispatch(updateStep4Approval({ approvalKey: 'diversion', data: { status: resolveApprovalStatus(approvals.diversion), expectedTime: approvals.diversion.expected_time || '' } }));
+                if (approvals.developmentPermission) dispatch(updateStep4Approval({ approvalKey: 'developmentPermission', data: { status: resolveApprovalStatus(approvals.developmentPermission), expectedTime: approvals.developmentPermission.expected_time || '' } }));
+            }
+
+            // Step 5
+            const fin = s5.financial_details || {};
+            const legal = s5.legal_details || {};
+            const brokerage = s5.brokerage || {};
+            const bankLoan = fin.bank_loan || {};
+            const regCharges = (typeof fin.registry_charges === 'object' && fin.registry_charges) ? fin.registry_charges : {};
+
+            const parseJsonArray = (val) => {
+                if (Array.isArray(val)) return val;
+                if (!val || val === '[]' || val === 'null') return [];
+                if (typeof val === 'string') {
+                    try { const p = JSON.parse(val); return Array.isArray(p) ? p : []; } catch { return val.split(',').map(i => i.trim()).filter(Boolean); }
+                }
+                return [];
+            };
+            const parseJsonObject = (val) => {
+                if (val && typeof val === 'object' && !Array.isArray(val)) return val;
+                if (typeof val === 'string') { try { const p = JSON.parse(val); return p && typeof p === 'object' && !Array.isArray(p) ? p : {}; } catch { return {}; } }
+                return {};
+            };
+
+            const jv = parseJsonObject(legal.jv_details);
+            const devAg = parseJsonObject(legal.dev_agreement_details);
+            const step5WasSubmitted = !!(fin.guideline_value || fin.guideline_value_unit || legal.ownership_type);
+            const loanAvailableVal = bankLoan.is_approved === true ? 'Yes' : (bankLoan.is_approved === false && step5WasSubmitted) ? 'No' : '';
+            const bankTieUpVal = bankLoan.banks ? 'Yes' : (bankLoan.bank_tie_up_available === true ? 'Yes' : (bankLoan.is_approved === true ? 'No' : ''));
+
+            dispatch(updateStep5({
+                brokerageAvailable:   brokerage.type && brokerage.type !== 'none' ? 'Yes' : 'No',
+                brokeragePercentage:  brokerage.value ? String(brokerage.value) : '',
+                brokerageTerms:       brokerage.terms || '',
+                guidelineValueAmount:       fin.guideline_value != null ? String(fin.guideline_value) : '',
+                guidelineValueUnit:         fin.guideline_value_unit || '',
+                propertyJurisdictionArea:   fin.property_jurisdiction_area || '',
+                guidelineYear:              fin.guideline_year || '',
+                guidelineReferenceDocuments: parseJsonArray(fin.guideline_reference_documents),
+                registryChargesAvailable:   (regCharges.male || regCharges.female || regCharges.other) ? 'Yes' : (step5WasSubmitted ? 'No' : ''),
+                registryChargesMaleBuyer:   regCharges.male   ? String(regCharges.male)   : '',
+                registryChargesFemaleBuyer: regCharges.female ? String(regCharges.female) : '',
+                otherGovernmentCharges:     regCharges.other  ? String(regCharges.other)  : '',
+                loanAvailable:          loanAvailableVal,
+                bankTieUpAvailable:     bankTieUpVal,
+                tieUpBankName:          Array.isArray(bankLoan.banks) ? bankLoan.banks.join(', ') : (bankLoan.banks || ''),
+                bankNameList:           Array.isArray(bankLoan.banks) ? bankLoan.banks.join(', ') : (bankLoan.banks || ''),
+                loanApprovalStatus:     bankLoan.loan_approval_status || '',
+                maximumLoanPercentage:  bankLoan.maximum_loan_percentage ? String(bankLoan.maximum_loan_percentage) : '',
+                requiredLoanDocuments:  parseJsonArray(bankLoan.required_loan_documents).join(', '),
+                ownershipType:              legal.ownership_type || '',
+                ownedOwnerCompanyName:      legal.owned_owner_company_name || '',
+                ownedDocuments:             parseJsonArray(legal.owned_documents),
+                otherOwnershipType:         legal.other_ownership_type || '',
+                ownershipSupportingDocuments: parseJsonArray(legal.ownership_supporting_documents),
+                jvLandOwnerName:            jv.land_owner || '',
+                jvDeveloperBuilderName:     jv.developer || '',
+                jvAgreementAvailable:       jv.agreement_available || '',
+                jvAgreementDocuments:       parseJsonArray(jv.documents),
+                jvRevenueAreaSharingDetails: jv.revenue_sharing || '',
+                developmentLandOwnerName:       devAg.land_owner || '',
+                developmentDeveloperName:        devAg.developer || '',
+                developmentAgreementAvailable:   devAg.agreement_available || '',
+                developmentAgreementDocuments:   parseJsonArray(devAg.documents),
+                titleVerificationStatus:   legal.title_verification_status || '',
+                titleVerificationDoneBy:   legal.title_verification_done_by || '',
+                titleVerificationDate:     legal.title_verification_date || '',
+                titleReportDocuments:      parseJsonArray(legal.title_report_documents),
+                financialOwnershipRemarks: legal.financial_ownership_remarks || '',
+            }));
+
+            // Step 6 — restore already-uploaded media
+            const savedMedia = resumeData.step6?.media || [];
+            if (savedMedia.length > 0) {
+                dispatch(updateStep6({
+                    images: savedMedia
+                        .filter(m => m.media_type === 'image')
+                        .map(m => ({ uri: m.url, isRemote: true })),
+                    documents: savedMedia
+                        .filter(m => m.media_type === 'document')
+                        .map(m => ({ uri: m.url, name: m.label || 'Document', mimeType: '', isRemote: true })),
+                }));
+            }
+
+            const resumeAt = resumeData.resume_at_step || 1;
+            setTimeout(() => dispatch(setStep(Math.min(resumeAt, 6))), 100);
+
+        } catch (e) {
+            console.warn("Resume API failed, cannot restore project data", e);
+            dispatch(setStep(1));
+        }
+        setDraftReady(true);
+    };
+
     useEffect(() => {
         if (!draftReady || !projectId) return;
 
@@ -311,6 +704,8 @@ export default function AddProject() {
                     sales_officer_contact: step1.salesOfficerContact,
                     responsible_person_name: step1.responsiblePersonName,
                     responsible_person_contact: step1.responsiblePersonContact,
+                    // Link to builder lead if form was opened from a lead
+                    lead_id: leadProjectId || undefined,
                 });
                 dispatch(setProjectId(res.data.data.project_id));
                 dispatch(setStep(2));
@@ -362,7 +757,9 @@ export default function AddProject() {
 
                 await Promise.all(
                     step2.selectedTypes.map(async (type) => {
-                        const units = step3.unitConfigs[type.id] || [];
+                        const allUnits = step3.unitConfigs[type.id] || [];
+                        // Only send assigned units to backend
+                        const units = allUnits.filter(u => u.isAssigned !== false);
                         if (units.length === 0) return;
 
                         // If bulk mode — CSV already uploaded to server, skip variant/sync
@@ -380,17 +777,31 @@ export default function AddProject() {
                         });
 
                         // Create one variant per unique combo, then sync its units
+                        // Also grab builder section data to persist floors/unitsPerFloor
+                        const builderSections = step3.builderData?.[type.id]?.sections || [];
+
                         await Promise.all(
                             Object.entries(variantMap).map(async ([, { blueprint, units: variantUnits }]) => {
+                                // Find the section this blueprint belongs to for floor/unit counts
+                                const section = builderSections.find(s => s.id === blueprint.sectionId) || builderSections[0];
+                                const sectionFloors = section?.floors ?? section?.rows ?? section?.lanes ?? null;
+                                const sectionUnitsPerFloor = section?.unitsPerFloor ?? section?.plotsPerRow ?? section?.villasPerLane ?? null;
+
                                 const variantPayload = {
-                                    category_type: blueprint.bhk || blueprint.officeType || type.subType,
-                                    variant_name: `${type.subType} - ${blueprint.bhk || blueprint.officeType || 'Standard'}`,
-                                    area_sqft: parseFloat(blueprint.area) || 0,
-                                    selling_price: parseFloat((blueprint.price || '').toString().replace(/,/g, '')) || 0,
-                                    property_type: type.mainType,
+                                    category_type:    blueprint.bhk || blueprint.officeType || type.subType,
+                                    variant_name:     blueprint.variantName || blueprint.bhk || blueprint.officeType || 'Standard',
+                                    area_sqft:        parseFloat(blueprint.area) || 0,
+                                    area_unit:        blueprint.areaUnit || 'Sq-ft',
+                                    selling_price:    parseFloat((blueprint.price || '').toString().replace(/,/g, '')) || 0,
+                                    property_type:    type.mainType,
                                     property_subtype: type.subType,
-                                    listing_type: 'buy',
-                                    images: blueprint.images || [],
+                                    listing_type:     'buy',
+                                    images:           blueprint.images || [],
+                                    amenities:        (blueprint.amenities || []).filter(Boolean),
+                                    extra_charges:    (blueprint.extraCharges || []).filter(e => e.title),
+                                    brochure_url:     blueprint.brochure || null,
+                                    floors:           sectionFloors,
+                                    units_per_floor:  sectionUnitsPerFloor,
                                 };
 
                                 const variantRes = await projectFormApi.createVariant(projectId, variantPayload);
@@ -438,37 +849,28 @@ export default function AddProject() {
                 if (!projectId || !shouldUseProjectFormApi) { dispatch(setStep(5)); return; }
                 try {
                     setIsSubmitting(true);
-                    const mapApproval = (status, expectedTime) => {
-                        if (!status) return undefined; // skip if not filled
-                        return {
-                            is_approved: status === 'Yes',
-                            expected_time: status === 'Yes' ? null : (expectedTime || null),
-                        };
-                    };
-                    const buildApprovals = () => {
-                        const obj = {};
-                        const tncp = mapApproval(step4.approvals.tncp.status, step4.approvals.tncp.expectedTime);
-                        const municipal = mapApproval(step4.approvals.buildingPermission.status, step4.approvals.buildingPermission.expectedTime);
-                        const diversion = mapApproval(step4.approvals.diversion.status, step4.approvals.diversion.expectedTime);
-                        const devPerm = mapApproval(step4.approvals.developmentPermission.status, step4.approvals.developmentPermission.expectedTime);
-                        const reraStatus = step4.approvals.rera.status;
-                        if (tncp) obj.tncp = tncp;
-                        if (municipal) obj.municipal = municipal;
-                        if (diversion) obj.diversion = diversion;
-                        if (devPerm) obj.developmentPermission = devPerm;
-                        if (reraStatus) {
-                            obj.rera = {
-                                is_approved: reraStatus === 'Yes',
-                                rera_id: reraStatus === 'Yes' ? (step4.approvals.rera.registrationNumber || null) : null,
-                                expected_time: reraStatus === 'Yes' ? null : (step4.approvals.rera.expectedTime || null),
-                            };
+
+                    const buildApproval = (s, extra = {}) => {
+                        const { _allowEmptyTime, ...restExtra } = extra;
+                        if (!s.status || s.status === 'Not Applicable') {
+                            return { is_approved: false, expected_time: null, ...restExtra };
                         }
-                        obj.bank_loan = {
-                            is_approved: step5.loanAvailable === 'Yes',
-                            banks: step5.tieUpBankName || step5.bankNameList || null,
+                        const isApproved = s.status === 'Yes';
+                        return {
+                            is_approved: isApproved,
+                            expected_time: isApproved ? null : (s.expectedTime || null),
+                            ...restExtra,
                         };
-                        return obj;
                     };
+
+                    const approvals = {
+                        tncp: buildApproval(step4.approvals.tncp),
+                        diversion: buildApproval(step4.approvals.diversion),
+                        rera: buildApproval(step4.approvals.rera, { rera_id: step4.approvals.rera.registrationNumber || null }),
+                        developmentPermission: buildApproval(step4.approvals.developmentPermission),
+                        municipal: buildApproval(step4.approvals.buildingPermission),
+                    };
+
                     await projectFormApi.finalizeStep4(projectId, {
                         possession_status: step4.possessionStatus || null,
                         possession_remarks: step4.possessionRemarks || null,
@@ -483,7 +885,7 @@ export default function AddProject() {
                         variant_possessions: [],
                         amenity_ids: [],
                         bank_account: null,
-                        approvals: buildApprovals(),
+                        approvals,
                     });
                     dispatch(setStep(5));
                 } catch (error) {
@@ -502,11 +904,66 @@ export default function AddProject() {
                 try {
                     setIsSubmitting(true);
                     await projectFormApi.finalizeStep5(projectId, {
-                        brokerage: { type: 'none', value: 0, terms: null },
+                        brokerage: {
+                            type:  step5.brokerageAvailable === 'Yes' ? 'percentage' : 'none',
+                            value: step5.brokerageAvailable === 'Yes' ? (parseFloat(step5.brokeragePercentage) || 0) : 0,
+                            terms: step5.brokerageTerms || null,
+                        },
                         incentives: { customer: null, broker: null },
-                        settings: { visibility: 'public', status: 'active' },
+                        settings: { visibility: 'public' },
                         assignments: { sales_officer_id: null, branch_manager_id: null },
                         video_url: null,
+                        financial_details: {
+                            guideline_value:               step5.guidelineValueAmount ? parseFloat(step5.guidelineValueAmount) || null : null,
+                            guideline_value_unit:          step5.guidelineValueUnit || null,
+                            property_jurisdiction_area:    step5.propertyJurisdictionArea || null,
+                            guideline_year:                step5.guidelineYear || null,
+                            guideline_reference_documents: step5.guidelineReferenceDocuments || [],
+                            registry_charges: step5.registryChargesAvailable === 'Yes'
+                                ? {
+                                    male:   step5.registryChargesMaleBuyer   || null,
+                                    female: step5.registryChargesFemaleBuyer || null,
+                                    other:  step5.otherGovernmentCharges     || null,
+                                }
+                                : null,
+                            bank_loan: {
+                                is_approved:              step5.loanAvailable === 'Yes',
+                                bank_tie_up_available:    step5.bankTieUpAvailable === 'Yes',
+                                banks:                    step5.bankTieUpAvailable === 'Yes' ? (step5.tieUpBankName || step5.bankNameList || null) : null,
+                                loan_approval_status:     step5.loanApprovalStatus || null,
+                                maximum_loan_percentage:  step5.maximumLoanPercentage || null,
+                                required_loan_documents:  step5.requiredLoanDocuments || null,
+                            },
+                        },
+                        legal_details: {
+                            ownership_type:             step5.ownershipType || null,
+                            owned_owner_company_name:   step5.ownedOwnerCompanyName || null,
+                            owned_documents:            step5.ownedDocuments || [],
+                            other_ownership_type:       step5.otherOwnershipType || null,
+                            ownership_supporting_documents: step5.ownershipSupportingDocuments || [],
+                            jv_details: step5.ownershipType === 'Joint Venture Project'
+                                ? {
+                                    land_owner:          step5.jvLandOwnerName || null,
+                                    developer:           step5.jvDeveloperBuilderName || null,
+                                    agreement_available: step5.jvAgreementAvailable || null,
+                                    revenue_sharing:     step5.jvRevenueAreaSharingDetails || null,
+                                    documents:           step5.jvAgreementDocuments || [],
+                                }
+                                : null,
+                            dev_agreement_details: step5.ownershipType === 'Development Agreement Project'
+                                ? {
+                                    land_owner:          step5.developmentLandOwnerName || null,
+                                    developer:           step5.developmentDeveloperName || null,
+                                    agreement_available: step5.developmentAgreementAvailable || null,
+                                    documents:           step5.developmentAgreementDocuments || [],
+                                }
+                                : null,
+                            title_verification_status:   step5.titleVerificationStatus || null,
+                            title_verification_done_by:  step5.titleVerificationDoneBy || null,
+                            title_verification_date:     step5.titleVerificationDate || null,
+                            title_report_documents:      step5.titleReportDocuments || [],
+                            financial_ownership_remarks: step5.financialOwnershipRemarks || null,
+                        },
                     });
                     dispatch(setStep(6));
                 } catch (error) {
@@ -542,11 +999,11 @@ export default function AddProject() {
             try {
                 setIsSubmitting(true);
 
-                // Upload each image as multipart and collect returned URLs
                 const mediaItems = [];
+
+                // Upload images
                 for (let i = 0; i < step6.images.length; i++) {
                     const img = step6.images[i];
-                    // If already a remote URL (re-upload scenario), use as-is
                     if (img.uri?.startsWith('http')) {
                         mediaItems.push({ media_type: 'image', url: img.uri, is_cover: i === 0, sort_order: i });
                         continue;
@@ -560,7 +1017,27 @@ export default function AddProject() {
                     const uploadRes = await projectFormApi.uploadMedia(projectId, formData);
                     const url = uploadRes.data?.data?.url || uploadRes.data?.url;
                     if (url) {
-                        mediaItems.push({ media_type: 'image', url, is_cover: i === 0, sort_order: i });
+                        mediaItems.push({ media_type: 'image', url, is_cover: i === 0, sort_order: mediaItems.length });
+                    }
+                }
+
+                // Upload documents
+                for (let i = 0; i < (step6.documents || []).length; i++) {
+                    const doc = step6.documents[i];
+                    if (doc.uri?.startsWith('http')) {
+                        mediaItems.push({ media_type: 'document', url: doc.uri, label: doc.name || `Document ${i + 1}`, sort_order: mediaItems.length });
+                        continue;
+                    }
+                    const formData = new FormData();
+                    formData.append('file', {
+                        uri: doc.uri,
+                        name: doc.name || `document_${i}.pdf`,
+                        type: doc.mimeType || 'application/pdf',
+                    });
+                    const uploadRes = await projectFormApi.uploadMedia(projectId, formData);
+                    const url = uploadRes.data?.data?.url || uploadRes.data?.url;
+                    if (url) {
+                        mediaItems.push({ media_type: 'document', url, label: doc.name || `Document ${i + 1}`, sort_order: mediaItems.length });
                     }
                 }
 
@@ -596,24 +1073,17 @@ export default function AddProject() {
         if (currentStep === 3) {
             if (step2.selectedTypes.length === 0) return true;
             
-            // Check if all selected types have at least one unit and all units are filled
+            // Check if all selected types have at least one assigned unit with data filled
             return step2.selectedTypes.some(type => {
                 const configs = step3.unitConfigs[type.id] || [];
-                if (configs.length === 0) return true;
-                
-                return configs.some(unit => {
-                    const baseFields = !unit.area || !unit.propertyNumber;
-                    if (baseFields) return true;
+                const assignedConfigs = configs.filter(u => u.isAssigned !== false);
+                if (assignedConfigs.length === 0) return true;
 
-                    if (type.subType === 'apartment') {
-                        if (!unit.tower || !unit.floor || !unit.bhk) return true;
-                    }
-                    if (type.subType === 'villa' || type.subType === 'rowhouse') {
-                        if (!unit.bhk) return true;
-                    }
-                    if (type.subType === 'office') {
-                        if (!unit.officeType) return true;
-                    }
+                return assignedConfigs.some(unit => {
+                    if (!unit.area) return true;
+                    if (type.subType === 'apartment' && (!unit.tower || !unit.floor || !unit.bhk)) return true;
+                    if ((type.subType === 'villa' || type.subType === 'rowhouse') && !unit.bhk) return true;
+                    if (type.subType === 'office' && !unit.officeType) return true;
                     return false;
                 });
             });
@@ -679,7 +1149,7 @@ export default function AddProject() {
                             <TouchableOpacity onPress={handleBack} className="p-1">
                                 <Ionicons name="arrow-back" size={20} color="white" />
                             </TouchableOpacity>
-                            <Text className="text-white text-base font-lato-bold">Continue Onboarding</Text>
+                            <Text className="text-white text-base font-lato-bold">Add Project</Text>
                             <View style={{ width: 20 }} />
                         </View>
 
@@ -1870,9 +2340,39 @@ function Step3() {
                                 </TouchableOpacity>
                             </View>
                             {configsList.length > 0 && (
-                                <Text className="text-xs text-green-600 font-lato-bold mt-2">
-                                    ✓ {configsList.length} units currently added.
-                                </Text>
+                                <View className="w-full mt-1 gap-2">
+                                    <View className="flex-row items-center gap-2">
+                                        <Ionicons name="checkmark-circle" size={14} color="#16a34a" />
+                                        <Text className="text-xs text-green-600 font-lato-bold">
+                                            {configsList.length} units saved
+                                        </Text>
+                                    </View>
+                                    {/* Header row */}
+                                    <View className="flex-row bg-[#4A43EC]/10 rounded-lg px-3 py-2">
+                                        <Text className="flex-1 text-[9px] font-lato-bold text-[#4A43EC] uppercase">Unit #</Text>
+                                        <Text className="w-16 text-[9px] font-lato-bold text-[#4A43EC] uppercase">Tower/Block</Text>
+                                        <Text className="w-12 text-[9px] font-lato-bold text-[#4A43EC] uppercase">Floor</Text>
+                                        <Text className="w-14 text-[9px] font-lato-bold text-[#4A43EC] uppercase">BHK/Type</Text>
+                                        <Text className="w-16 text-[9px] font-lato-bold text-[#4A43EC] uppercase text-right">Price</Text>
+                                    </View>
+                                    {/* Unit rows — cap at 50 for perf */}
+                                    {configsList.slice(0, 50).map((u, idx) => (
+                                        <View key={idx} className={`flex-row px-3 py-2 rounded-lg ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} border border-gray-100`}>
+                                            <Text className="flex-1 text-[10px] font-lato text-gray-700" numberOfLines={1}>{u.propertyNumber || '-'}</Text>
+                                            <Text className="w-16 text-[10px] font-lato text-gray-500" numberOfLines={1}>{u.tower || '-'}</Text>
+                                            <Text className="w-12 text-[10px] font-lato text-gray-500" numberOfLines={1}>{u.floor || '-'}</Text>
+                                            <Text className="w-14 text-[10px] font-lato text-gray-500" numberOfLines={1}>{u.bhk || u.officeType || '-'}</Text>
+                                            <Text className="w-16 text-[10px] font-lato-bold text-[#4A43EC] text-right" numberOfLines={1}>
+                                                {u.price ? `₹${Number(u.price).toLocaleString('en-IN')}` : '-'}
+                                            </Text>
+                                        </View>
+                                    ))}
+                                    {configsList.length > 50 && (
+                                        <Text className="text-[10px] text-gray-400 font-lato text-center py-1">
+                                            +{configsList.length - 50} more units
+                                        </Text>
+                                    )}
+                                </View>
                             )}
                         </View>
                     ) : (
