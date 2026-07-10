@@ -14,12 +14,15 @@ import {
     Keyboard,
     TouchableWithoutFeedback,
     Modal,
+    ActivityIndicator,
+    Linking,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
+import * as Location from "expo-location";
 import { useDispatch, useSelector } from "react-redux";
 import {
     setStep,
@@ -128,6 +131,97 @@ const OWNERSHIP_TYPES = [
     "Collaboration Project",
     "Other",
 ];
+
+const normalizeApiDate = (value) => {
+    if (!value) return "";
+    if (typeof value === "string") return value.split("T")[0];
+    if (value instanceof Date && !isNaN(value.getTime())) return value.toISOString().split("T")[0];
+    return String(value);
+};
+
+const resolveApprovalStatusFromApi = (approval) => {
+    if (!approval) return "";
+    if (approval.is_approved === true) return "Yes";
+    if (approval.is_approved === false && approval.expected_time) return "No";
+    return "";
+};
+
+const mapStep4ApprovalFromApi = (approvalKey, approval) => {
+    if (!approval) return {};
+    const data = {
+        status: resolveApprovalStatusFromApi(approval),
+        expectedTime: approval.expected_time || "",
+        documents: approval.documents || [],
+    };
+
+    switch (approvalKey) {
+        case "diversion":
+            data.referenceNumber = approval.referenceNumber || "";
+            data.approvalDate = normalizeApiDate(approval.approvalDate);
+            break;
+        case "tncp":
+            data.approvalNumber = approval.referenceNumber || "";
+            data.approvalDate = normalizeApiDate(approval.approvalDate);
+            break;
+        case "developmentPermission":
+            data.permissionNumber = approval.referenceNumber || "";
+            data.permissionDate = normalizeApiDate(approval.approvalDate);
+            break;
+        case "rera":
+            data.registrationNumber = approval.rera_id || "";
+            data.registrationDate = normalizeApiDate(approval.approvalDate);
+            break;
+        case "buildingPermission":
+            data.permissionNumber = approval.referenceNumber || "";
+            data.permissionDate = normalizeApiDate(approval.approvalDate);
+            break;
+        default:
+            break;
+    }
+
+    return data;
+};
+
+const buildStep4ApprovalPayload = (approvalKey, approval) => {
+    if (!approval.status || approval.status === "Not Applicable") {
+        return { is_approved: false, expected_time: null };
+    }
+
+    const isApproved = approval.status === "Yes";
+    const payload = {
+        is_approved: isApproved,
+        expected_time: isApproved ? null : (approval.expectedTime || null),
+        documents: approval.documents || [],
+    };
+
+    switch (approvalKey) {
+        case "diversion":
+            payload.referenceNumber = approval.referenceNumber || null;
+            payload.approvalDate = approval.approvalDate || null;
+            break;
+        case "tncp":
+            payload.referenceNumber = approval.approvalNumber || null;
+            payload.approvalDate = approval.approvalDate || null;
+            break;
+        case "developmentPermission":
+            payload.referenceNumber = approval.permissionNumber || null;
+            payload.approvalDate = approval.permissionDate || null;
+            break;
+        case "rera":
+            payload.rera_id = approval.registrationNumber || null;
+            payload.approvalDate = approval.registrationDate || null;
+            break;
+        case "buildingPermission":
+            payload.referenceNumber = approval.permissionNumber || null;
+            payload.approvalDate = approval.permissionDate || null;
+            break;
+        default:
+            break;
+    }
+
+    return payload;
+};
+
 const shouldUseProjectFormApi = Boolean(process.env.EXPO_PUBLIC_API_BASE_URL);
 
 export default function AddProject() {
@@ -531,17 +625,31 @@ export default function AddProject() {
             });
 
             // Step 4
-            if (s4.possession_status || s4.project_launch_status || s4.development_progress != null || s4.overall_approval_status) {
+            const approvals = s4.approvals || {};
+            const hasApprovals = Object.values(approvals).some((ap) =>
+                ap && (ap.is_approved === true || ap.expected_time || ap.referenceNumber || ap.approvalDate || ap.rera_id)
+            );
+            if (
+                s4.possession_status ||
+                s4.project_launch_status ||
+                s4.development_progress != null ||
+                s4.overall_approval_status ||
+                s4.expected_possession_date ||
+                s4.project_launch_date ||
+                s4.expected_launch_date ||
+                hasApprovals
+            ) {
                 const parseChecklist = (val) => {
                     if (Array.isArray(val)) return val;
                     try { return JSON.parse(val || '[]'); } catch { return []; }
                 };
                 dispatch(updateStep4({
                     possessionStatus: s4.possession_status ? s4.possession_status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '',
+                    expectedPossessionDate: normalizeApiDate(s4.expected_possession_date),
                     possessionRemarks: s4.possession_remarks || '',
                     projectLaunchStatus: s4.project_launch_status || '',
-                    projectLaunchDate: s4.project_launch_date || '',
-                    expectedLaunchDate: s4.expected_launch_date || '',
+                    projectLaunchDate: normalizeApiDate(s4.project_launch_date),
+                    expectedLaunchDate: normalizeApiDate(s4.expected_launch_date),
                     developmentCompletionPercentage: s4.development_progress != null ? String(s4.development_progress) : '',
                     currentDevelopmentStage: parseChecklist(s4.development_checklist),
                     developmentRemarks: s4.development_remarks || '',
@@ -549,19 +657,11 @@ export default function AddProject() {
                     overallApprovalStatus: s4.overall_approval_status || 'Not verified yet',
                 }));
 
-                const approvals = s4.approvals || {};
-                const resolveApprovalStatus = (ap) => {
-                    if (!ap) return '';
-                    if (ap.is_approved === true) return 'Yes';
-                    if (ap.is_approved === false && ap.expected_time) return 'No';
-                    return '';
-                };
-
-                if (approvals.tncp) dispatch(updateStep4Approval({ approvalKey: 'tncp', data: { status: resolveApprovalStatus(approvals.tncp), expectedTime: approvals.tncp.expected_time || '' } }));
-                if (approvals.municipal) dispatch(updateStep4Approval({ approvalKey: 'buildingPermission', data: { status: resolveApprovalStatus(approvals.municipal), expectedTime: approvals.municipal.expected_time || '' } }));
-                if (approvals.rera) dispatch(updateStep4Approval({ approvalKey: 'rera', data: { status: resolveApprovalStatus(approvals.rera), registrationNumber: approvals.rera.rera_id || '', expectedTime: approvals.rera.expected_time || '' } }));
-                if (approvals.diversion) dispatch(updateStep4Approval({ approvalKey: 'diversion', data: { status: resolveApprovalStatus(approvals.diversion), expectedTime: approvals.diversion.expected_time || '' } }));
-                if (approvals.developmentPermission) dispatch(updateStep4Approval({ approvalKey: 'developmentPermission', data: { status: resolveApprovalStatus(approvals.developmentPermission), expectedTime: approvals.developmentPermission.expected_time || '' } }));
+                if (approvals.diversion) dispatch(updateStep4Approval({ approvalKey: 'diversion', data: mapStep4ApprovalFromApi('diversion', approvals.diversion) }));
+                if (approvals.tncp) dispatch(updateStep4Approval({ approvalKey: 'tncp', data: mapStep4ApprovalFromApi('tncp', approvals.tncp) }));
+                if (approvals.developmentPermission) dispatch(updateStep4Approval({ approvalKey: 'developmentPermission', data: mapStep4ApprovalFromApi('developmentPermission', approvals.developmentPermission) }));
+                if (approvals.rera) dispatch(updateStep4Approval({ approvalKey: 'rera', data: mapStep4ApprovalFromApi('rera', approvals.rera) }));
+                if (approvals.municipal) dispatch(updateStep4Approval({ approvalKey: 'buildingPermission', data: mapStep4ApprovalFromApi('buildingPermission', approvals.municipal) }));
             }
 
             // Step 5
@@ -578,6 +678,18 @@ export default function AddProject() {
                     try { const p = JSON.parse(val); return Array.isArray(p) ? p : []; } catch { return val.split(',').map(i => i.trim()).filter(Boolean); }
                 }
                 return [];
+            };
+            // Converts string URLs or mixed arrays → proper doc objects for DocumentUploadButton
+            const parseDocArray = (val, labelPrefix = 'Document') => {
+                const arr = parseJsonArray(val);
+                return arr.map((item, i) => {
+                    if (typeof item === 'string') {
+                        const fileName = item.split('/').pop() || `${labelPrefix} ${i + 1}`;
+                        return { uri: item, url: item, name: fileName, isRemote: true };
+                    }
+                    // Already an object — ensure uri is set
+                    return { uri: item.uri || item.url || '', url: item.url || item.uri || '', name: item.name || item.label || `${labelPrefix} ${i + 1}`, isRemote: true, ...item };
+                });
             };
             const parseJsonObject = (val) => {
                 if (val && typeof val === 'object' && !Array.isArray(val)) return val;
@@ -599,7 +711,7 @@ export default function AddProject() {
                 guidelineValueUnit:         fin.guideline_value_unit || '',
                 propertyJurisdictionArea:   fin.property_jurisdiction_area || '',
                 guidelineYear:              fin.guideline_year || '',
-                guidelineReferenceDocuments: parseJsonArray(fin.guideline_reference_documents),
+                guidelineReferenceDocuments: parseDocArray(fin.guideline_reference_documents, 'Guideline Doc'),
                 registryChargesAvailable:   (regCharges.male || regCharges.female || regCharges.other) ? 'Yes' : (step5WasSubmitted ? 'No' : ''),
                 registryChargesMaleBuyer:   regCharges.male   ? String(regCharges.male)   : '',
                 registryChargesFemaleBuyer: regCharges.female ? String(regCharges.female) : '',
@@ -613,23 +725,31 @@ export default function AddProject() {
                 requiredLoanDocuments:  parseJsonArray(bankLoan.required_loan_documents).join(', '),
                 ownershipType:              legal.ownership_type || '',
                 ownedOwnerCompanyName:      legal.owned_owner_company_name || '',
-                ownedDocuments:             parseJsonArray(legal.owned_documents),
+                ownedDocuments:             parseDocArray(legal.owned_documents, 'Ownership Doc'),
                 otherOwnershipType:         legal.other_ownership_type || '',
-                ownershipSupportingDocuments: parseJsonArray(legal.ownership_supporting_documents),
+                ownershipSupportingDocuments: parseDocArray(legal.ownership_supporting_documents, 'Supporting Doc'),
                 jvLandOwnerName:            jv.land_owner || '',
                 jvDeveloperBuilderName:     jv.developer || '',
                 jvAgreementAvailable:       jv.agreement_available || '',
-                jvAgreementDocuments:       parseJsonArray(jv.documents),
+                jvAgreementDocuments:       parseDocArray(jv.documents, 'JV Agreement'),
                 jvRevenueAreaSharingDetails: jv.revenue_sharing || '',
                 developmentLandOwnerName:       devAg.land_owner || '',
                 developmentDeveloperName:        devAg.developer || '',
                 developmentAgreementAvailable:   devAg.agreement_available || '',
-                developmentAgreementDocuments:   parseJsonArray(devAg.documents),
+                developmentAgreementDocuments:   parseDocArray(devAg.documents, 'Dev Agreement'),
                 titleVerificationStatus:   legal.title_verification_status || '',
                 titleVerificationDoneBy:   legal.title_verification_done_by || '',
-                titleVerificationDate:     legal.title_verification_date || '',
-                titleReportDocuments:      parseJsonArray(legal.title_report_documents),
+                titleVerificationDate:     normalizeApiDate(legal.title_verification_date),
+                titleReportDocuments:      parseDocArray(legal.title_report_documents, 'Title Report'),
+                titleExpectedCompletionDate: normalizeApiDate(legal.title_expected_completion_date),
                 financialOwnershipRemarks: legal.financial_ownership_remarks || '',
+                // Extra fields
+                customerIncentives: s5.incentives?.customer || '',
+                brokerIncentives:   s5.incentives?.broker   || '',
+                videoUrl:           s5.video_url            || '',
+                visibility:         s5.settings?.visibility || 'public',
+                salesOfficerId:     s5.assignments?.sales_officer_id   || null,
+                branchManagerId:    s5.assignments?.branch_manager_id  || null,
             }));
 
             // Step 6 — restore already-uploaded media
@@ -676,6 +796,46 @@ export default function AddProject() {
             }),
         );
     }, [currentStep, dispatch, draftReady, projectId, step1, step2, step3, step4, step5, step6]);
+
+    const uploadDocsAndUrls = async (docs, labelPrefix = 'Doc') => {
+        if (!docs || !Array.isArray(docs)) return [];
+        const result = [];
+        for (let i = 0; i < docs.length; i++) {
+            const doc = docs[i];
+            const uri = doc?.uri || doc?.url || (typeof doc === 'string' ? doc : '');
+            if (!uri) continue;
+
+            if (uri.startsWith('http')) {
+                result.push({
+                    url: uri,
+                    uri: uri,
+                    name: doc.name || doc.label || `${labelPrefix} ${i + 1}`,
+                });
+            } else {
+                const formData = new FormData();
+                formData.append('file', {
+                    uri: uri,
+                    name: doc.name || `${labelPrefix.toLowerCase().replace(/\s+/g, '_')}_${i + 1}.pdf`,
+                    type: doc.mimeType || 'application/pdf',
+                });
+                try {
+                    const uploadRes = await projectFormApi.uploadMedia(projectId, formData);
+                    const uploadedUrl = uploadRes.data?.data?.url || uploadRes.data?.url;
+                    if (uploadedUrl) {
+                        result.push({
+                            url: uploadedUrl,
+                            uri: uploadedUrl,
+                            name: doc.name || `${labelPrefix} ${i + 1}`,
+                        });
+                    }
+                } catch (uploadErr) {
+                    console.error(`Failed to upload ${labelPrefix}:`, uploadErr);
+                    result.push(doc); // Fallback
+                }
+            }
+        }
+        return result;
+    };
 
     const handleNext = async () => {
         if (currentStep === 1) {
@@ -780,12 +940,65 @@ export default function AddProject() {
                         // Also grab builder section data to persist floors/unitsPerFloor
                         const builderSections = step3.builderData?.[type.id]?.sections || [];
 
+                        const variantIdMap = {};
+
+                        // 1. Create/update all variants sequentially/concurrently
                         await Promise.all(
-                            Object.entries(variantMap).map(async ([, { blueprint, units: variantUnits }]) => {
+                            Object.entries(variantMap).map(async ([variantKey, { blueprint }]) => {
                                 // Find the section this blueprint belongs to for floor/unit counts
                                 const section = builderSections.find(s => s.id === blueprint.sectionId) || builderSections[0];
                                 const sectionFloors = section?.floors ?? section?.rows ?? section?.lanes ?? null;
                                 const sectionUnitsPerFloor = section?.unitsPerFloor ?? section?.plotsPerRow ?? section?.villasPerLane ?? null;
+
+                                // Upload variant images if they are local
+                                const uploadedImages = [];
+                                if (blueprint.images && Array.isArray(blueprint.images)) {
+                                    for (let i = 0; i < blueprint.images.length; i++) {
+                                        const imgUri = blueprint.images[i];
+                                        if (imgUri.startsWith('http')) {
+                                            uploadedImages.push(imgUri);
+                                        } else {
+                                            const formData = new FormData();
+                                            formData.append('file', {
+                                                uri: imgUri,
+                                                name: `variant_image_${i}.jpg`,
+                                                type: 'image/jpeg',
+                                            });
+                                            try {
+                                                const uploadRes = await projectFormApi.uploadMedia(projectId, formData);
+                                                const url = uploadRes.data?.data?.url || uploadRes.data?.url;
+                                                if (url) uploadedImages.push(url);
+                                            } catch (uploadErr) {
+                                                console.error("Failed to upload variant image:", uploadErr);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Upload variant brochure first if local
+                                let uploadedBrochureUrl = null;
+                                if (blueprint.brochure) {
+                                    if (typeof blueprint.brochure === 'string' && blueprint.brochure.startsWith('http')) {
+                                        uploadedBrochureUrl = blueprint.brochure;
+                                    } else if (blueprint.brochure.uri) {
+                                        if (blueprint.brochure.uri.startsWith('http')) {
+                                            uploadedBrochureUrl = blueprint.brochure.uri;
+                                        } else {
+                                            const formData = new FormData();
+                                            formData.append('file', {
+                                                uri: blueprint.brochure.uri,
+                                                name: blueprint.brochure.name || 'brochure.pdf',
+                                                type: blueprint.brochure.mimeType || 'application/pdf',
+                                            });
+                                            try {
+                                                const uploadRes = await projectFormApi.uploadMedia(projectId, formData);
+                                                uploadedBrochureUrl = uploadRes.data?.data?.url || uploadRes.data?.url || null;
+                                            } catch (uploadErr) {
+                                                console.error("Failed to upload variant brochure:", uploadErr);
+                                            }
+                                        }
+                                    }
+                                }
 
                                 const variantPayload = {
                                     category_type:    blueprint.bhk || blueprint.officeType || type.subType,
@@ -796,39 +1009,44 @@ export default function AddProject() {
                                     property_type:    type.mainType,
                                     property_subtype: type.subType,
                                     listing_type:     'buy',
-                                    images:           blueprint.images || [],
+                                    images:           uploadedImages,
                                     amenities:        (blueprint.amenities || []).filter(Boolean),
-                                    extra_charges:    (blueprint.extraCharges || []).filter(e => e.title),
-                                    brochure_url:     blueprint.brochure || null,
+                                    extra_charges:    (blueprint.extraCharges || blueprint.extra_charges || []).filter(charge => charge && charge.title),
+                                    brochure_url:     uploadedBrochureUrl,
                                     floors:           sectionFloors,
                                     units_per_floor:  sectionUnitsPerFloor,
                                 };
 
                                 const variantRes = await projectFormApi.createVariant(projectId, variantPayload);
-                                const variantId = variantRes.data.data.variant_id;
-
-                                // Group this variant's units by block/tower
-                                const blockMap = {};
-                                variantUnits.forEach((unit) => {
-                                    const blockName = unit.tower || 'Block A';
-                                    if (!blockMap[blockName]) blockMap[blockName] = [];
-                                    blockMap[blockName].push({
-                                        variant_id: variantId,
-                                        unit_number: unit.propertyNumber,
-                                        floor: unit.floor || null,
-                                    });
-                                });
-
-                                await Promise.all(
-                                    Object.entries(blockMap).map(([block_name, blockUnits]) =>
-                                        projectFormApi.syncGridUnits(projectId, {
-                                            property_subtype: type.subType,
-                                            block_name,
-                                            units: blockUnits,
-                                        })
-                                    )
-                                );
+                                variantIdMap[variantKey] = variantRes.data.data.variant_id;
                             })
+                        );
+
+                        // 2. Map all units to their created variant_id and group by block
+                        const blockMap = {};
+                        units.forEach((unit) => {
+                            const variantKey = `${unit.bhk || unit.officeType || 'standard'}_${unit.area}_${unit.price || '0'}`;
+                            const dbVariantId = variantIdMap[variantKey];
+                            if (!dbVariantId) return;
+
+                            const blockName = unit.tower || 'Block A';
+                            if (!blockMap[blockName]) blockMap[blockName] = [];
+                            blockMap[blockName].push({
+                                variant_id: dbVariantId,
+                                unit_number: unit.propertyNumber,
+                                floor: unit.floor || null,
+                            });
+                        });
+
+                        // 3. Sync all units block-by-block (one single call per block containing all variants!)
+                        await Promise.all(
+                            Object.entries(blockMap).map(([block_name, blockUnits]) =>
+                                projectFormApi.syncGridUnits(projectId, {
+                                    property_subtype: type.subType,
+                                    block_name,
+                                    units: blockUnits,
+                                })
+                            )
                         );
                     })
                 );
@@ -850,29 +1068,39 @@ export default function AddProject() {
                 try {
                     setIsSubmitting(true);
 
-                    const buildApproval = (s, extra = {}) => {
-                        const { _allowEmptyTime, ...restExtra } = extra;
-                        if (!s.status || s.status === 'Not Applicable') {
-                            return { is_approved: false, expected_time: null, ...restExtra };
-                        }
-                        const isApproved = s.status === 'Yes';
-                        return {
-                            is_approved: isApproved,
-                            expected_time: isApproved ? null : (s.expectedTime || null),
-                            ...restExtra,
-                        };
-                    };
+                    // Upload approval documents if they are local
+                    const tncpDocs = await uploadDocsAndUrls(step4.approvals?.tncp?.documents, 'TNCP Doc');
+                    const diversionDocs = await uploadDocsAndUrls(step4.approvals?.diversion?.documents, 'Diversion Doc');
+                    const reraDocs = await uploadDocsAndUrls(step4.approvals?.rera?.documents, 'RERA Doc');
+                    const devPermissionDocs = await uploadDocsAndUrls(step4.approvals?.developmentPermission?.documents, 'Dev Permission');
+                    const municipalDocs = await uploadDocsAndUrls(step4.approvals?.buildingPermission?.documents, 'Municipal Doc');
 
                     const approvals = {
-                        tncp: buildApproval(step4.approvals.tncp),
-                        diversion: buildApproval(step4.approvals.diversion),
-                        rera: buildApproval(step4.approvals.rera, { rera_id: step4.approvals.rera.registrationNumber || null }),
-                        developmentPermission: buildApproval(step4.approvals.developmentPermission),
-                        municipal: buildApproval(step4.approvals.buildingPermission),
+                        tncp: {
+                            ...buildStep4ApprovalPayload('tncp', step4.approvals.tncp),
+                            documents: tncpDocs,
+                        },
+                        diversion: {
+                            ...buildStep4ApprovalPayload('diversion', step4.approvals.diversion),
+                            documents: diversionDocs,
+                        },
+                        rera: {
+                            ...buildStep4ApprovalPayload('rera', step4.approvals.rera),
+                            documents: reraDocs,
+                        },
+                        developmentPermission: {
+                            ...buildStep4ApprovalPayload('developmentPermission', step4.approvals.developmentPermission),
+                            documents: devPermissionDocs,
+                        },
+                        municipal: {
+                            ...buildStep4ApprovalPayload('buildingPermission', step4.approvals.buildingPermission),
+                            documents: municipalDocs,
+                        },
                     };
 
                     await projectFormApi.finalizeStep4(projectId, {
                         possession_status: step4.possessionStatus || null,
+                        expected_possession_date: step4.expectedPossessionDate || null,
                         possession_remarks: step4.possessionRemarks || null,
                         project_launch_status: step4.projectLaunchStatus || null,
                         project_launch_date: step4.projectLaunchDate || null,
@@ -903,22 +1131,39 @@ export default function AddProject() {
                 if (!projectId || !shouldUseProjectFormApi) { dispatch(setStep(6)); return; }
                 try {
                     setIsSubmitting(true);
+
+                    // Upload Step 5 financial and legal documents if local
+                    const guidelineDocs = await uploadDocsAndUrls(step5.guidelineReferenceDocuments, 'Guideline Doc');
+                    const ownedDocs = await uploadDocsAndUrls(step5.ownedDocuments, 'Ownership Doc');
+                    const jvDocs = await uploadDocsAndUrls(step5.jvAgreementDocuments, 'JV Agreement');
+                    const devAgreementDocs = await uploadDocsAndUrls(step5.developmentAgreementDocuments, 'Dev Agreement');
+                    const titleReportDocs = await uploadDocsAndUrls(step5.titleReportDocuments, 'Title Report');
+                    const supportingDocs = await uploadDocsAndUrls(step5.ownershipSupportingDocuments, 'Supporting Doc');
+
                     await projectFormApi.finalizeStep5(projectId, {
                         brokerage: {
                             type:  step5.brokerageAvailable === 'Yes' ? 'percentage' : 'none',
                             value: step5.brokerageAvailable === 'Yes' ? (parseFloat(step5.brokeragePercentage) || 0) : 0,
                             terms: step5.brokerageTerms || null,
                         },
-                        incentives: { customer: null, broker: null },
-                        settings: { visibility: 'public' },
-                        assignments: { sales_officer_id: null, branch_manager_id: null },
-                        video_url: null,
+                        incentives: {
+                            customer: step5.customerIncentives || null,
+                            broker:   step5.brokerIncentives   || null,
+                        },
+                        settings: {
+                            visibility: step5.visibility || 'public',
+                        },
+                        assignments: {
+                            sales_officer_id:   step5.salesOfficerId   || null,
+                            branch_manager_id:  step5.branchManagerId  || null,
+                        },
+                        video_url: step5.videoUrl || null,
                         financial_details: {
                             guideline_value:               step5.guidelineValueAmount ? parseFloat(step5.guidelineValueAmount) || null : null,
                             guideline_value_unit:          step5.guidelineValueUnit || null,
                             property_jurisdiction_area:    step5.propertyJurisdictionArea || null,
                             guideline_year:                step5.guidelineYear || null,
-                            guideline_reference_documents: step5.guidelineReferenceDocuments || [],
+                            guideline_reference_documents: guidelineDocs,
                             registry_charges: step5.registryChargesAvailable === 'Yes'
                                 ? {
                                     male:   step5.registryChargesMaleBuyer   || null,
@@ -929,25 +1174,34 @@ export default function AddProject() {
                             bank_loan: {
                                 is_approved:              step5.loanAvailable === 'Yes',
                                 bank_tie_up_available:    step5.bankTieUpAvailable === 'Yes',
-                                banks:                    step5.bankTieUpAvailable === 'Yes' ? (step5.tieUpBankName || step5.bankNameList || null) : null,
+                                banks: step5.bankTieUpAvailable === 'Yes'
+                                    ? (step5.tieUpBankName || step5.bankNameList || '')
+                                        .split(',')
+                                        .map((bank) => bank.trim())
+                                        .filter(Boolean)
+                                    : null,
                                 loan_approval_status:     step5.loanApprovalStatus || null,
                                 maximum_loan_percentage:  step5.maximumLoanPercentage || null,
-                                required_loan_documents:  step5.requiredLoanDocuments || null,
+                                required_loan_documents:  step5.requiredLoanDocuments
+                                    ? (typeof step5.requiredLoanDocuments === 'string'
+                                        ? step5.requiredLoanDocuments.split(',').map(s => s.trim()).filter(Boolean)
+                                        : step5.requiredLoanDocuments)
+                                    : [],
                             },
                         },
                         legal_details: {
                             ownership_type:             step5.ownershipType || null,
                             owned_owner_company_name:   step5.ownedOwnerCompanyName || null,
-                            owned_documents:            step5.ownedDocuments || [],
+                            owned_documents:            ownedDocs,
                             other_ownership_type:       step5.otherOwnershipType || null,
-                            ownership_supporting_documents: step5.ownershipSupportingDocuments || [],
+                            ownership_supporting_documents: supportingDocs,
                             jv_details: step5.ownershipType === 'Joint Venture Project'
                                 ? {
                                     land_owner:          step5.jvLandOwnerName || null,
                                     developer:           step5.jvDeveloperBuilderName || null,
                                     agreement_available: step5.jvAgreementAvailable || null,
                                     revenue_sharing:     step5.jvRevenueAreaSharingDetails || null,
-                                    documents:           step5.jvAgreementDocuments || [],
+                                    documents:           jvDocs,
                                 }
                                 : null,
                             dev_agreement_details: step5.ownershipType === 'Development Agreement Project'
@@ -955,14 +1209,15 @@ export default function AddProject() {
                                     land_owner:          step5.developmentLandOwnerName || null,
                                     developer:           step5.developmentDeveloperName || null,
                                     agreement_available: step5.developmentAgreementAvailable || null,
-                                    documents:           step5.developmentAgreementDocuments || [],
+                                    documents:           devAgreementDocs,
                                 }
                                 : null,
-                            title_verification_status:   step5.titleVerificationStatus || null,
-                            title_verification_done_by:  step5.titleVerificationDoneBy || null,
-                            title_verification_date:     step5.titleVerificationDate || null,
-                            title_report_documents:      step5.titleReportDocuments || [],
-                            financial_ownership_remarks: step5.financialOwnershipRemarks || null,
+                            title_verification_status:       step5.titleVerificationStatus || null,
+                            title_verification_done_by:      step5.titleVerificationDoneBy || null,
+                            title_verification_date:         step5.titleVerificationDate || null,
+                            title_report_documents:          titleReportDocs,
+                            title_expected_completion_date:  step5.titleExpectedCompletionDate || null,
+                            financial_ownership_remarks:     step5.financialOwnershipRemarks || null,
                         },
                     });
                     dispatch(setStep(6));
@@ -1233,6 +1488,8 @@ export default function AddProject() {
 function Step1({ errors = {}, setErrors }) {
     const dispatch = useDispatch();
     const { step1 } = useSelector((state) => state.project);
+    const [fetchingLocation, setFetchingLocation] = useState(false);
+
     const updateField = (field, value) => {
         dispatch(updateStep1({ [field]: value }));
         if (setErrors) {
@@ -1242,6 +1499,55 @@ function Step1({ errors = {}, setErrors }) {
                 delete copy[field];
                 return copy;
             });
+        }
+    };
+
+    const fetchCurrentLocation = async () => {
+        setFetchingLocation(true);
+        try {
+            const { granted } = await Location.requestForegroundPermissionsAsync();
+            if (!granted) {
+                alert("Location permission denied. Please allow location access.");
+                return;
+            }
+            let loc;
+            try {
+                loc = await Location.getCurrentPositionAsync({
+                    accuracy: Location.Accuracy.Balanced,
+                    timeout: 7000,
+                });
+            } catch (posErr) {
+                console.warn("Failed to get current location coordinates, using default Indore coordinates:", posErr.message);
+                loc = {
+                    coords: {
+                        latitude: 22.7196,
+                        longitude: 75.8577,
+                    }
+                };
+            }
+
+            const [address] = await Location.reverseGeocodeAsync({
+                latitude: loc.coords.latitude,
+                longitude: loc.coords.longitude,
+            });
+            if (address) {
+                const parts = [address.name, address.street, address.district].filter(Boolean);
+                const fullLocation = parts.join(', ') || `${loc.coords.latitude.toFixed(5)}, ${loc.coords.longitude.toFixed(5)}`;
+                updateField('location', fullLocation);
+                if (address.city || address.subregion)  updateField('city',  address.city || address.subregion || '');
+                if (address.region)                      updateField('state', address.region || '');
+                if (address.postalCode)                  updateField('pincode', address.postalCode || '');
+            } else {
+                updateField('location', `${loc.coords.latitude.toFixed(5)}, ${loc.coords.longitude.toFixed(5)}`);
+                updateField('city', 'Indore');
+                updateField('state', 'Madhya Pradesh');
+                updateField('pincode', '452001');
+            }
+        } catch (e) {
+            console.error("fetchCurrentLocation Error:", e);
+            alert("Could not fetch location. Try again.");
+        } finally {
+            setFetchingLocation(false);
         }
     };
     const projectNameRef = useRef(null);
@@ -1289,9 +1595,17 @@ function Step1({ errors = {}, setErrors }) {
                         onChangeText={(v) => updateField('location', v)}
                         style={{ paddingVertical: 0, textAlignVertical: 'center', includeFontPadding: false }}
                     />
-                    <View className="w-7 h-7 rounded-lg bg-[#EBEAFF] items-center justify-center">
-                        <Ionicons name="locate" size={16} color="#4A43EC" />
-                    </View>
+                    <TouchableOpacity
+                        onPress={fetchCurrentLocation}
+                        disabled={fetchingLocation}
+                        activeOpacity={0.7}
+                        className="w-7 h-7 rounded-lg bg-[#EBEAFF] items-center justify-center"
+                    >
+                        {fetchingLocation
+                            ? <ActivityIndicator size={12} color="#4A43EC" />
+                            : <Ionicons name="locate" size={16} color="#4A43EC" />
+                        }
+                    </TouchableOpacity>
                 </Pressable>
                 {errors.location && (
                     <Text className="text-[11px] text-red-500 mt-1">{errors.location}</Text>
@@ -1744,16 +2058,6 @@ function Step3() {
                 rowUnitCounts: prev.sections[0]?.rowUnitCounts ? JSON.parse(JSON.stringify(prev.sections[0].rowUnitCounts)) : {},
                 unitOverrides: {}
             };
-            
-            if (newSection.configs.length > 0) {
-                const rCount = newSection.floors;
-                const cCount = newSection.unitsPerFloor;
-                for (let r = 1; r <= rCount; r++) {
-                    for (let c = 1; c <= cCount; c++) {
-                        newSection.unitMap[`${r}_${c}`] = newSection.configs[0].id;
-                    }
-                }
-            }
 
             return {
                 ...prev,
@@ -2845,7 +3149,12 @@ function Step3() {
                                                                                 const assignedCfg = section.configs?.find(cfg => cfg.id === assignedCfgId);
                                                                                 const override = section.unitOverrides?.[key] || {};
                                                                                 const displayNum = `${r}${c.toString().padStart(2, '0')}`;
-                                                                                const label = override.customName || displayNum;
+                                                                                const rangeLabel = (section.name || '').trim() || 'A';
+                                                                                const rangeBasedNumber = `${rangeLabel}-${c}`;
+                                                                                const defaultPropertyNumber = RANGE_BASED_SUB_TYPES.has(activeType?.subType)
+                                                                                    ? rangeBasedNumber
+                                                                                    : displayNum;
+                                                                                const label = override.customName || defaultPropertyNumber;
                                                                                 const hasOverride = override.customName || override.customArea || override.customPrice;
 
                                                                                 return (
@@ -2876,12 +3185,6 @@ function Step3() {
                                                                                             <Text className="text-[9px] font-lato text-gray-300 mt-1 uppercase" numberOfLines={1}>
                                                                                                 Unassigned
                                                                                             </Text>
-                                                                                        )}
-
-                                                                                        {hasOverride && (
-                                                                                            <View className="absolute top-0 right-0 w-4 h-4 bg-[#F59E0B] rounded-bl-lg items-center justify-center shadow-xs">
-                                                                                                <Ionicons name="star" size={9} color="white" />
-                                                                                            </View>
                                                                                         )}
                                                                                     </TouchableOpacity>
                                                                                 );
@@ -2947,7 +3250,12 @@ function Step3() {
                                                                                 const assignedCfg = section.configs?.find(cfg => cfg.id === assignedCfgId);
                                                                                 const override = section.unitOverrides?.[key] || {};
                                                                                 const displayNum = `${r}${c.toString().padStart(2, '0')}`;
-                                                                                const label = override.customName || displayNum;
+                                                                                const rangeLabel = (section.name || '').trim() || 'A';
+                                                                                const rangeBasedNumber = `${rangeLabel}-${c}`;
+                                                                                const defaultPropertyNumber = RANGE_BASED_SUB_TYPES.has(activeType?.subType)
+                                                                                    ? rangeBasedNumber
+                                                                                    : displayNum;
+                                                                                const label = override.customName || defaultPropertyNumber;
                                                                                 const hasOverride = override.customName || override.customArea || override.customPrice;
 
                                                                                 return (
@@ -2978,12 +3286,6 @@ function Step3() {
                                                                                             <Text className="text-[9px] font-lato text-gray-300 mt-1 uppercase" numberOfLines={1}>
                                                                                                 Unassigned
                                                                                             </Text>
-                                                                                        )}
-
-                                                                                        {hasOverride && (
-                                                                                            <View className="absolute top-0 right-0 w-4 h-4 bg-[#F59E0B] rounded-bl-lg items-center justify-center shadow-xs">
-                                                                                                <Ionicons name="star" size={9} color="white" />
-                                                                                            </View>
                                                                                         )}
                                                                                     </TouchableOpacity>
                                                                                 );
@@ -3323,6 +3625,26 @@ const DocumentUploadButton = ({ label, documents, onDocumentsPicked }) => {
         }
     };
 
+    const viewDocument = async (doc) => {
+        const url = doc.url || doc.uri;
+        if (!url) return;
+        try {
+            if (url.startsWith('http')) {
+                await Linking.openURL(url);
+            } else {
+                const canShare = await Sharing.isAvailableAsync();
+                if (canShare) await Sharing.shareAsync(url);
+                else await Linking.openURL(url);
+            }
+        } catch { /* silent */ }
+    };
+
+    const removeDocument = (index) => {
+        onDocumentsPicked((documents || []).filter((_, i) => i !== index));
+    };
+
+    const docList = documents || [];
+
     return (
         <View>
             <Text className="text-xs font-lato-bold text-black mb-2">{label}</Text>
@@ -3332,16 +3654,47 @@ const DocumentUploadButton = ({ label, documents, onDocumentsPicked }) => {
             >
                 <Ionicons name="document-attach-outline" size={20} color="#4A43EC" />
                 <Text className="text-xs font-lato-bold text-[#4A43EC] mt-2">
-                    {(documents || []).length > 0 ? `${documents.length} Document(s) Added` : "Upload Document"}
+                    {docList.length > 0 ? `+ Add More Documents` : "Upload Document"}
                 </Text>
             </TouchableOpacity>
+            {docList.length > 0 && (
+                <View className="mt-2 gap-1.5">
+                    {docList.map((doc, idx) => (
+                        <View key={`${doc.uri || doc.url}-${idx}`} className="flex-row items-center bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl overflow-hidden">
+                            <TouchableOpacity 
+                                onPress={() => viewDocument(doc)} 
+                                className="flex-1 flex-row items-center px-3 py-2"
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="document-text-outline" size={16} color="#4A43EC" />
+                                <Text className="flex-1 mx-2 text-[11px] font-lato-bold text-[#111827]" numberOfLines={1}>
+                                    {doc.name || doc.label || `Document ${idx + 1}`}
+                                </Text>
+                                <Ionicons name="eye-outline" size={16} color="#4A43EC" />
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                onPress={() => removeDocument(idx)} 
+                                className="p-3" 
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="trash-outline" size={15} color="#EF4444" />
+                            </TouchableOpacity>
+                        </View>
+                    ))}
+                </View>
+            )}
         </View>
     );
 };
 
 const EXPECTED_TIME_OPTIONS = ["3 months", "6 months", "9 months", "12 months", "18 months", "24 months", "24+ months"];
 
-function ApprovalBlock({ title, approvalKey, options = APPROVAL_STATUS_OPTIONS, fields }) {
+const isDateField = (field) => {
+    const text = `${field.key} ${field.label} ${field.placeholder || ""}`.toLowerCase();
+    return text.includes("date");
+};
+
+function ApprovalBlock({ title, approvalKey, options = APPROVAL_STATUS_OPTIONS, fields, pickerVisible, setPickerVisible }) {
     const dispatch = useDispatch();
     const approval = useSelector((state) => state.project.step4.approvals[approvalKey]);
     const updateApproval = (data) => dispatch(updateStep4Approval({ approvalKey, data }));
@@ -3358,16 +3711,29 @@ function ApprovalBlock({ title, approvalKey, options = APPROVAL_STATUS_OPTIONS, 
 
             {approval.status === "Yes" && (
                 <View className="gap-4">
-                    {fields.yes.map(field => (
-                        <FieldInput
-                            key={field.key}
-                            label={field.label}
-                            placeholder={field.placeholder}
-                            value={approval[field.key]}
-                            keyboardType={field.keyboardType}
-                            onChangeText={(value) => updateApproval({ [field.key]: value })}
-                        />
-                    ))}
+                    {fields.yes.map(field =>
+                        isDateField(field) ? (
+                            <DatePickerField
+                                key={field.key}
+                                label={field.label}
+                                value={approval[field.key]}
+                                fieldKey={`${approvalKey}_${field.key}`}
+                                pickerVisible={pickerVisible}
+                                setPickerVisible={setPickerVisible}
+                                onDateChange={(value) => updateApproval({ [field.key]: value })}
+                                maxDate={new Date()}
+                            />
+                        ) : (
+                            <FieldInput
+                                key={field.key}
+                                label={field.label}
+                                placeholder={field.placeholder}
+                                value={approval[field.key]}
+                                keyboardType={field.keyboardType}
+                                onChangeText={(value) => updateApproval({ [field.key]: value })}
+                            />
+                        )
+                    )}
                     <DocumentUploadButton
                         label={fields.documentLabel}
                         documents={approval.documents}
@@ -3531,6 +3897,8 @@ function Step4() {
                 <ApprovalBlock
                     title="A. Diversion Approval"
                     approvalKey="diversion"
+                    pickerVisible={pickerVisible}
+                    setPickerVisible={setPickerVisible}
                     fields={{
                         statusLabel: "Is Diversion Approved?",
                         yes: [
@@ -3544,6 +3912,8 @@ function Step4() {
                 <ApprovalBlock
                     title="B. TNCP Approval"
                     approvalKey="tncp"
+                    pickerVisible={pickerVisible}
+                    setPickerVisible={setPickerVisible}
                     fields={{
                         statusLabel: "Is TNCP Approved?",
                         yes: [
@@ -3557,6 +3927,8 @@ function Step4() {
                 <ApprovalBlock
                     title="C. Development Permission"
                     approvalKey="developmentPermission"
+                    pickerVisible={pickerVisible}
+                    setPickerVisible={setPickerVisible}
                     fields={{
                         statusLabel: "Is Development Permission Approved?",
                         yes: [
@@ -3571,6 +3943,8 @@ function Step4() {
                     title="D. RERA Approval"
                     approvalKey="rera"
                     options={OPTIONAL_APPROVAL_STATUS_OPTIONS}
+                    pickerVisible={pickerVisible}
+                    setPickerVisible={setPickerVisible}
                     fields={{
                         statusLabel: "Is the Project RERA Approved?",
                         yes: [
@@ -3588,6 +3962,8 @@ function Step4() {
                     title="E. Building Permission"
                     approvalKey="buildingPermission"
                     options={OPTIONAL_APPROVAL_STATUS_OPTIONS}
+                    pickerVisible={pickerVisible}
+                    setPickerVisible={setPickerVisible}
                     fields={{
                         statusLabel: "Is Building Permission Approved?",
                         yes: [
@@ -3616,6 +3992,7 @@ function Step5() {
     const dispatch = useDispatch();
     const { step5 } = useSelector((state) => state.project);
     const updateField = (field, value) => dispatch(updateStep5({ [field]: value }));
+    const [pickerVisible, setPickerVisible] = useState(null);
 
     return (
         <View className="gap-5">
@@ -3694,12 +4071,28 @@ function Step5() {
                 {step5.titleVerificationStatus === "Yes" && (
                     <View className="gap-4">
                         <FieldInput label="Title Verification Done By" placeholder="Enter verifier name / company" value={step5.titleVerificationDoneBy} onChangeText={(value) => updateField("titleVerificationDoneBy", value)} />
-                        <FieldInput label="Title Verification Date" placeholder="Select verification date" value={step5.titleVerificationDate} onChangeText={(value) => updateField("titleVerificationDate", value)} />
+                        <DatePickerField
+                            label="Title Verification Date"
+                            value={step5.titleVerificationDate}
+                            fieldKey="titleVerificationDate"
+                            pickerVisible={pickerVisible}
+                            setPickerVisible={setPickerVisible}
+                            onDateChange={(value) => updateField("titleVerificationDate", value)}
+                            maxDate={new Date()}
+                        />
                         <DocumentUploadButton label="Upload Title Report" documents={step5.titleReportDocuments} onDocumentsPicked={(documents) => updateField("titleReportDocuments", documents)} />
                     </View>
                 )}
                 {step5.titleVerificationStatus === "Under Process" && (
-                    <FieldInput label="Expected Completion Date" placeholder="Select expected completion date" value={step5.titleExpectedCompletionDate} onChangeText={(value) => updateField("titleExpectedCompletionDate", value)} />
+                    <DatePickerField
+                        label="Expected Completion Date"
+                        value={step5.titleExpectedCompletionDate}
+                        fieldKey="titleExpectedCompletionDate"
+                        pickerVisible={pickerVisible}
+                        setPickerVisible={setPickerVisible}
+                        onDateChange={(value) => updateField("titleExpectedCompletionDate", value)}
+                        minDate={new Date()}
+                    />
                 )}
             </FormSection>
 

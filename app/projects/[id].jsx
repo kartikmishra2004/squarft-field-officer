@@ -1078,18 +1078,39 @@ function FollowUpCard({ item, projectName, onDone }) {
                 </TouchableOpacity>
                 <TouchableOpacity
                     activeOpacity={0.85}
-                    onPress={() => onDone(item.id)}
-                    className="h-8 flex-1 items-center justify-center rounded-[9px] bg-[#EBF1FF]"
+                    onPress={() => !item.isDone && onDone(item.id)}
+                    className={`h-8 flex-1 items-center justify-center rounded-[9px] ${item.isDone ? "bg-[#DCFCE7]" : "bg-[#EBF1FF]"}`}
                 >
-                    <Text className="text-[11px] font-lato-bold text-[#4A43EC]">Done</Text>
+                    <Text className={`text-[11px] font-lato-bold ${item.isDone ? "text-[#16A34A]" : "text-[#4A43EC]"}`}>
+                        {item.isDone ? "Completed" : "Done"}
+                    </Text>
                 </TouchableOpacity>
             </View>
         </View>
     );
 }
 
-function MeetingCard({ item, projectName, onDone }) {
+function MeetingCard({ item, projectName, projectId, onDone }) {
     const tone = meetingToneStyles[item.tone] ?? meetingToneStyles.primary;
+
+    const handleNavigate = () => {
+        if (!item.location && !item.latitude) {
+            Alert.alert("No location", "This meeting has no location set.");
+            return;
+        }
+        // Always use in-app navigation — address will be geocoded inside navigate.jsx
+        router.push({
+            pathname: "/projects/navigate",
+            params: {
+                lat: item.latitude || "",
+                lng: item.longitude || "",
+                address: item.location || "",
+                label: item.location || projectName,
+                meetingId: item.id,
+                leadId: projectId,
+            },
+        });
+    };
 
     return (
         <View className="mb-2 rounded-[12px] border border-[#EEF0F4] bg-white px-3 py-2.5">
@@ -1122,17 +1143,13 @@ function MeetingCard({ item, projectName, onDone }) {
                     className="mr-2 h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#4A43EC]"
                 >
                     <Ionicons name="checkmark" size={12} color="#fff" />
-                    <Text className="ml-1.5 text-[11px] font-lato-bold text-white">Done</Text>
+                    <Text className="ml-1.5 text-[11px] font-lato-bold text-white">
+                        {item.isDone ? "Completed" : "Done"}
+                    </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                     activeOpacity={0.85}
-                    onPress={() =>
-                        openUrl(
-                            item.latitude && item.longitude
-                                ? `https://www.google.com/maps/search/?api=1&query=${item.latitude},${item.longitude}`
-                                : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.location)}`,
-                        )
-                    }
+                    onPress={handleNavigate}
                     className="h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#EBF1FF]"
                 >
                     <Ionicons name="location-outline" size={12} color="#4A43EC" />
@@ -1143,8 +1160,7 @@ function MeetingCard({ item, projectName, onDone }) {
     );
 }
 
-function Activity({ project, activeActivityTab, onActivityTabChange, onActivityDone }) {
-    const items = (activeActivityTab === "followUp" ? project.followUps : project.meetings) || [];
+function Activity({ project, activeActivityTab, onActivityTabChange, onActivityDone }) {    const items = (activeActivityTab === "followUp" ? project.followUps : project.meetings) || [];
 
     return (
         <View className="px-4 pt-3">
@@ -1174,7 +1190,7 @@ function Activity({ project, activeActivityTab, onActivityTabChange, onActivityD
                 activeActivityTab === "followUp" ? (
                     <FollowUpCard key={item.id} item={item} projectName={project.projectName} onDone={(activityId) => onActivityDone("followUp", activityId)} />
                 ) : (
-                    <MeetingCard key={item.id} item={item} projectName={project.projectName} onDone={(activityId) => onActivityDone("meeting", activityId)} />
+                    <MeetingCard key={item.id} item={item} projectName={project.projectName} projectId={project.id} onDone={(activityId) => onActivityDone("meeting", activityId)} />
                 ),
             )}
 
@@ -1212,7 +1228,7 @@ const normalizeFollowUps = (apiFollowUps = []) =>
             ? f.follow_up_status.charAt(0).toUpperCase() + f.follow_up_status.slice(1)
             : "Warm",
         tone: f.follow_up_status === "hot" ? "hot" : f.follow_up_status === "cold" ? "warning" : "warning",
-        isDone: false,
+        isDone: f.is_completed === true,
         voice_note_url: f.voice_note_url || null,
         site_photo_url: f.site_photo_url || null,
         meta: {
@@ -1304,7 +1320,7 @@ export default function ProjectDetail() {
     const [activeSheet, setActiveSheet] = useState("followUp");
     const [submitting, setSubmitting] = useState(false);
     const bottomSheetRef = useRef(null);
-    const sheetSnapPoints = useMemo(() => ["86%"], []);
+    const sheetSnapPoints = useMemo(() => ["92%"], []);
     const reduxProject = useSelector((state) => selectProjectById(state, projectId));
 
     const [apiProject, setApiProject] = useState(() => {
@@ -1347,23 +1363,21 @@ export default function ProjectDetail() {
         });
     }, []);
 
-    // Single call: getLeadDetails returns lead + journey + follow_ups + meetings
+    // Always fetch from API to get latest follow_ups + meetings with lead_id
     useEffect(() => {
-        if (!reduxProject) {
-            setApiLoading(true);
-            leadsAPI.getLeadDetails(projectId)
-                .then((res) => {
-                    const inner = res?.data || res || {};
-                    const { lead, journey, follow_ups, meetings } = inner;
-                    if (lead) {
-                        setApiProject(normalizeApiLead(lead, journey || [], follow_ups || [], meetings || []));
-                    }
-                })
-                .catch((err) => {
-                    console.log("getLeadDetails error", err?.response?.data || err?.message);
-                })
-                .finally(() => setApiLoading(false));
-        }
+        setApiLoading(!reduxProject);
+        leadsAPI.getLeadDetails(projectId)
+            .then((res) => {
+                const inner = res?.data || res || {};
+                const { lead, journey, follow_ups, meetings } = inner;
+                if (lead) {
+                    setApiProject(normalizeApiLead(lead, journey || [], follow_ups || [], meetings || []));
+                }
+            })
+            .catch((err) => {
+                console.log("getLeadDetails error", err?.response?.data || err?.message);
+            })
+            .finally(() => setApiLoading(false));
     }, [projectId, reduxProject]);
 
     const project = useMemo(
@@ -1387,22 +1401,76 @@ export default function ProjectDetail() {
     // Build FormData for follow-up (handles optional file attachments)
     const buildFollowUpPayload = (followUp) => {
         const { meta, voiceNoteFile, sitePhotoFile } = followUp;
+
+        // Map UI follow-up status labels → backend enum values
+        // Backend accepts: hot | warm | cold | suspended
+        const statusValueMap = {
+            "Hot":          "hot",
+            "Warm":         "warm",
+            "Cold":         "cold",
+            "Docs Pending": "warm",   // no direct equivalent → warm
+            "Overdue":      "cold",   // treat overdue as cold
+            "Done":         "warm",   // completed state → warm fallback
+        };
+
+        // Map UI next-action labels → backend enum values
+        // Backend accepts: schedule_another_call | schedule_meeting | send_company_profile |
+        //                  collect_documents | start_onboarding
+        const actionValueMap = {
+            "Schedule another call":  "schedule_another_call",
+            "Schedule meeting":       "schedule_meeting",
+            "Send company profile":   "send_company_profile",
+            "Collect documents":      "collect_documents",
+            "Start onboarding":       "start_onboarding",
+        };
+
+        // Map UI follow-up type labels → backend enum values
+        // Backend accepts: call | site_visit | office_visit | video_call
+        const typeValueMap = {
+            "Call":         "call",
+            "Site Visit":   "site_visit",
+            "Office Visit": "office_visit",
+            "Video Call":   "video_call",
+        };
+
+        const follow_up_type   = typeValueMap[meta.followUpType]   || "call";
+        const follow_up_status = statusValueMap[meta.followUpStatus] || "warm";
+        const next_action      = actionValueMap[meta.nextAction]    || "schedule_another_call";
+
+        // Map UI outcome labels → backend enum values
+        // Backend accepts: connected | not_reachable | interested | need_more_time |
+        //                  not_interested | documents_pending | meeting_requested
+        const outcomeValueMap = {
+            "No Response":               "not_reachable",
+            "Call Later":                "need_more_time",
+            "Builder Busy":              "not_reachable",
+            "Interested":                "interested",
+            "Need More Time":            "need_more_time",
+            "Meeting Required":          "meeting_requested",
+            "Site Visit Required":       "meeting_requested",
+            "Documents Asked":           "documents_pending",
+            "Pricing Discussion Pending":"need_more_time",
+            "Not Interested":            "not_interested",
+            "Onboarding Ready":          "interested",
+        };
+        const outcome = outcomeValueMap[meta.outcome] || "connected";
+
         if (!voiceNoteFile && !sitePhotoFile) {
-            // Plain JSON — map UI values to backend snake_case option values
             return {
-                follow_up_type: meta.followUpType?.toLowerCase().replace(/ /g, "_") || "call",
-                outcome: meta.outcome?.toLowerCase().replace(/ /g, "_") || "connected",
-                follow_up_status: meta.followUpStatus?.toLowerCase() || "warm",
-                next_action: meta.nextAction?.toLowerCase().replace(/ /g, "_") || "schedule_another_call",
+                follow_up_type,
+                outcome,
+                follow_up_status,
+                next_action,
                 next_follow_up_at: meta.nextFollowUpAt,
                 remarks: followUp.note || undefined,
             };
         }
+
         const form = new FormData();
-        form.append("follow_up_type", meta.followUpType?.toLowerCase().replace(/ /g, "_") || "call");
-        form.append("outcome", meta.outcome?.toLowerCase().replace(/ /g, "_") || "connected");
-        form.append("follow_up_status", meta.followUpStatus?.toLowerCase() || "warm");
-        form.append("next_action", meta.nextAction?.toLowerCase().replace(/ /g, "_") || "schedule_another_call");
+        form.append("follow_up_type",    follow_up_type);
+        form.append("outcome",           outcome);
+        form.append("follow_up_status",  follow_up_status);
+        form.append("next_action",       next_action);
         form.append("next_follow_up_at", meta.nextFollowUpAt);
         if (followUp.note) form.append("remarks", followUp.note);
         if (voiceNoteFile) {
@@ -1466,6 +1534,7 @@ export default function ProjectDetail() {
                     "15 minutes before": 15,
                     "30 minutes before": 30,
                     "1 hour before": 60,
+                    "2 hours before": 120,
                     "1 day before": 1440,
                 };
                 const agendaValueMap = {
@@ -1493,7 +1562,7 @@ export default function ProjectDetail() {
                     meeting_type: meetingTypeValueMap[meeting.type] || "site_meeting",
                     meeting_status: meetingStatusValueMap[meeting.status] || "scheduled",
                     meeting_at: meeting.meta.scheduledAt,
-                    location_address: meeting.location,
+                    location_address: meeting.location || "To be confirmed",
                     agenda: (meeting.meta.agenda || []).map((a) => agendaValueMap[a] || a),
                     notes_preparation: meeting.meta.notes || undefined,
                     reminder_minutes: reminderMap[meeting.meta.reminder] ?? 30,
@@ -1559,8 +1628,39 @@ export default function ProjectDetail() {
     }, [dispatch, project?.phoneNumber, projectId]);
 
     const markActivityDone = useCallback(
-        (activityType, activityId) => {
-            dispatch(markProjectActivityDone({ projectId, activityType, activityId }));
+        async (activityType, activityId) => {
+            try {
+                // leadId is always the current screen's projectId
+                // activityId is the follow-up/meeting UUID
+                if (activityType === "followUp") {
+                    await leadsAPI.updateFollowUpCompletion(projectId, activityId, true);
+                    setApiProject((prev) => {
+                        if (!prev) return prev;
+                        return {
+                            ...prev,
+                            followUps: prev.followUps.map((f) =>
+                                f.id === activityId ? { ...f, isDone: true } : f,
+                            ),
+                        };
+                    });
+                } else {
+                    await leadsAPI.updateMeetingCompletion(projectId, activityId, true);
+                    setApiProject((prev) => {
+                        if (!prev) return prev;
+                        return {
+                            ...prev,
+                            meetings: prev.meetings.map((m) =>
+                                m.id === activityId ? { ...m, isDone: true, status: "Completed" } : m,
+                            ),
+                        };
+                    });
+                }
+                dispatch(markProjectActivityDone({ projectId, activityType, activityId }));
+                Alert.alert("Done", activityType === "followUp" ? "Follow-up marked as completed." : "Meeting marked as completed.");
+            } catch (err) {
+                console.log("markActivityDone error", err?.response?.data || err?.message);
+                Alert.alert("Failed", err?.response?.data?.message || "Could not mark as done. Please try again.");
+            }
         },
         [dispatch, projectId],
     );
@@ -1706,6 +1806,9 @@ export default function ProjectDetail() {
                 snapPoints={sheetSnapPoints}
                 backdropComponent={renderBackdrop}
                 enablePanDownToClose
+                keyboardBehavior="extend"
+                keyboardBlurBehavior="restore"
+                android_keyboardInputMode="adjustResize"
                 backgroundStyle={{ backgroundColor: "#F8FAFC" }}
                 handleIndicatorStyle={{ backgroundColor: "transparent" }}
             >

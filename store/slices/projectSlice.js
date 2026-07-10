@@ -80,6 +80,16 @@ const initialState = {
         titleReportDocuments: [],
         titleExpectedCompletionDate: '',
         financialOwnershipRemarks: '',
+        // Step 5 extra fields
+        brokerageAvailable: '',
+        brokeragePercentage: '',
+        brokerageTerms: '',
+        customerIncentives: '',
+        brokerIncentives: '',
+        videoUrl: '',
+        visibility: 'public',
+        salesOfficerId: null,
+        branchManagerId: null,
     },
     step6: {
         images: [],
@@ -159,58 +169,54 @@ const projectSlice = createSlice({
                 const rows = section.floors ?? section.rows ?? section.lanes ?? 1;
                 const cols = section.unitsPerFloor ?? section.plotsPerRow ?? section.villasPerLane ?? 1;
 
-                // Pre-calculate cumulative row offsets for sequential numbering
-                const rowOffsets = {};
-                let cumulative = 0;
                 for (let r = 1; r <= rows; r++) {
-                    rowOffsets[r] = cumulative;
-                    cumulative += (section.rowUnitCounts?.[r] ?? cols);
-                }
-
-                for (let r = 1; r <= rows; r++) {
+                    // Determine columns in this row (respecting row-based count adjustments)
                     const rowCols = section.rowUnitCounts?.[r] ?? cols;
                     for (let c = 1; c <= rowCols; c++) {
                         const key = `${r}_${c}`;
-                        const configId = section.unitMap?.[key];
-                        const config = configId ? (section.configs?.find(cfg => cfg.id === configId) || {}) : {};
-                        const override = section.unitOverrides?.[key] || {};
+                        
+                        // Process only cells that have an assigned variant
+                        if (section.unitMap && section.unitMap[key]) {
+                            const configId = section.unitMap[key];
+                            const config = section.configs?.find(cfg => cfg.id === configId) || {};
+                            const override = section.unitOverrides?.[key] || {};
 
-                        // Sequential number across all rows/cols
-                        const seqNum = rowOffsets[r] + c;
-                        const rangeLabel = (section.name || '').trim() || 'A';
-                        const rangeBasedNumber = `${rangeLabel}-${seqNum}`;
-                        const defaultPropertyNumber = (subType === 'plot' || subType === 'villa' || subType === 'rowhouse')
-                            ? rangeBasedNumber
-                            : String(seqNum);
-                        const propertyNumber = override.customName || defaultPropertyNumber;
-                        const unitId = `${typeId}-${section.id}-${key}`;
+                            // Generate default property number based on subtype rules
+                            const displayNum = `${r}${c.toString().padStart(2, '0')}`;
+                            const rangeLabel = (section.name || '').trim() || 'A';
+                            const rangeBasedNumber = `${rangeLabel}-${c}`;
+                            const defaultPropertyNumber = (subType === 'plot' || subType === 'villa' || subType === 'rowhouse')
+                                ? rangeBasedNumber
+                                : displayNum;
 
-                        const unitConfig = {
-                            unitId,
-                            sectionId: section.id,
-                            gridKey: key,
-                            row: r,
-                            column: c,
-                            tower: section.name,
-                            floor: r.toString(),
-                            bhk: subType === 'office' ? (config.type || '') : (config.type || ''),
-                            officeType: subType === 'office' ? (config.type || '') : '',
-                            variantName: config.name || '',
-                            area: (override.customArea || config.area || '0').toString(),
-                            areaUnit: config.areaUnit || (subType === 'plot' ? 'Sq-yrd' : 'Sq-ft'),
-                            price: (override.customPrice || config.price || '').toString().replace(/,/g, ''),
-                            images: config.images || [],
-                            brochure: config.brochure || null,
-                            amenities: (config.amenities || []).filter(Boolean).length > 0
-                                ? (config.amenities || []).filter(Boolean)
-                                : [''],
-                            propertyNumber: propertyNumber,
-                            hasShop: false,
-                            extraCharges: [{ title: 'Maintenance', amount: '0' }],
-                            isAssigned: !!configId,
-                        };
+                            const propertyNumber = override.customName || defaultPropertyNumber;
+                            const unitId = `${typeId}-${section.id}-${key}`;
 
-                        newUnitConfigs.push(unitConfig);
+                            // Build standardized unit config object
+                            const unitConfig = {
+                                unitId,
+                                sectionId: section.id,
+                                gridKey: key,
+                                row: r,
+                                column: c,
+                                tower: section.name,
+                                floor: r.toString(),
+                                bhk: subType === 'office' ? (config.type || 'Co-working') : (config.type || '2 BHK'),
+                                officeType: subType === 'office' ? (config.type || 'Co-working') : '',
+                                variantName: config.name || '',
+                                area: (override.customArea || config.area || '0').toString(),
+                                areaUnit: subType === 'plot' ? 'Sq-yrd' : 'Sq-ft',
+                                price: (override.customPrice || config.price || '').toString().replace(/,/g, ''),
+                                images: config.images || [],
+                                brochure: config.brochure || null,
+                                amenities: (config.amenities || []).filter(Boolean).length > 0 ? (config.amenities || []).filter(Boolean) : [''],
+                                propertyNumber: propertyNumber,
+                                hasShop: false,
+                                extraCharges: (config.extra_charges || []).filter(e => e && e.title).length > 0 ? config.extra_charges : [{ title: '', amount: '' }]
+                            };
+
+                            newUnitConfigs.push(unitConfig);
+                        }
                     }
                 }
             });

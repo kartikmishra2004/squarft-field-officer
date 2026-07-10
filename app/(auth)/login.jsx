@@ -3,9 +3,9 @@ import { StatusBar } from "expo-status-bar";
 import { Link, router } from "expo-router";
 import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { Ionicons, AntDesign } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { setMobile, setPassword, toggleRememberMe, setLoggedIn } from "../../store/slices/authSlice";
-import { authAPI } from "../../services/api";
+//import { authAPI } from "../../services/api";
 const logo = require("../../assets/icons/app-icon.png");
 
 export default function Login() {
@@ -22,7 +22,7 @@ export default function Login() {
 
         setLoading(true);
         try {
-            const response = await authAPI.login(mobile, password);
+            //const response = await authAPI.login(mobile, password);
             dispatch(setLoggedIn(true));
             router.replace("/(tabs)/home");
         } catch (error) {
@@ -38,13 +38,13 @@ export default function Login() {
 
             {/*  */}
             <View className="bg-[#4A43EC] pt-16 pb-10 px-6">
-              
+
                 <View style={{ width: 60, height: 60, overflow: 'hidden' }} className="mb-6">
                     <Image source={logo} style={{ width: 110, height: 110, margin: -20 }} resizeMode="contain" />
                 </View>
                 <Text className="text-white text-[36px] font-bold mb-1">Login</Text>
                 <View className="flex-row items-center">
-                    <Text className="text-white/80 text-[14px]">Don't have an account? </Text>
+                    <Text className="text-white/80 text-[14px]">{"Don't have an account?"} </Text>
                     <Link href="/register">
                         <Text className="text-white text-[14px] font-semibold underline">Sign Up</Text>
                     </Link>
@@ -53,7 +53,7 @@ export default function Login() {
 
             <View className="flex-1 bg-white px-6 pt-8">
 
-             
+
                 <Text className="text-gray-500 text-[13px] mb-1.5">Mobile Number</Text>
                 <View className="border border-gray-200 rounded-xl px-4 py-2 mb-5">
                     <TextInput
@@ -86,7 +86,7 @@ export default function Login() {
                     </TouchableOpacity>
                 </View>
 
-               
+
                 <View className="flex-row items-center justify-between mb-7">
                     <TouchableOpacity
                         className="flex-row items-center gap-2"
@@ -102,7 +102,7 @@ export default function Login() {
                     </Link>
                 </View>
 
-        
+
                 <TouchableOpacity
                     onPress={handleLogin}
                     disabled={loading}
@@ -115,24 +115,8 @@ export default function Login() {
                     )}
                 </TouchableOpacity>
 
-        
-              <TouchableOpacity className="flex-row items-center justify-center border border-gray-200 rounded-3xl py-4 mb-4 relative">
-    <Image 
-        source={require('../../assets/icons/google.png')} 
-        style={{ width: 20, height: 20, position: 'absolute', left: 20 }} 
-        resizeMode="contain"
-    />
-    <Text className="text-black text-[15px] font-semibold">Continue With Google</Text>
-</TouchableOpacity>
 
-                <TouchableOpacity className="flex-row items-center justify-center border border-gray-200 rounded-3xl py-4 mb-4 relative">
-                       <Image 
-        source={require('../../assets/icons/apple-logo.png')} 
-        style={{ width: 20, height: 20, position: 'absolute', left: 20 }} 
-        resizeMode="contain"
-    />
-                    <Text className="text-black text-[15px] font-semibold">Continue With Apple</Text>
-                </TouchableOpacity>
+
 
             </View>
         </View>

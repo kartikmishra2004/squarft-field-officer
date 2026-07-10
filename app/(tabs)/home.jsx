@@ -115,8 +115,18 @@ async function openUrl(url) {
 }
 
 function callPhoneNumber(phone) { openUrl(`tel:${phone}`); }
-function openMapLocation(lat, lng) {
-    openUrl(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
+function navigateToLocation({ lat, lng, address, label, meetingId, projectId }) {
+    router.push({
+        pathname: "/projects/navigate",
+        params: {
+            lat: lat || "",
+            lng: lng || "",
+            address: address || "",
+            label: label || address || "",
+            meetingId: meetingId || "",
+            leadId: projectId || "",
+        },
+    });
 }
 
 export default function Home() {
@@ -140,13 +150,14 @@ export default function Home() {
 
     const visibleMeetings = apiMeetings
         ? apiMeetings.map((m) => ({
-              id: m.id, // Meeting ID
-              projectId: m.leadId || m.projectId, // Lead ID for API calls
-              projectName: m.title, 
-              location: m.subtitle,
-              time: m.time, 
-              note: m.note, 
-              status: m.tag, 
+              id: m.id,
+              projectId: m.leadId || m.projectId,
+              projectName: m.title,
+              location: m.location || m.subtitle, // clean address for geocoding
+              subtitle: m.subtitle,               // display string
+              time: m.time,
+              note: m.note,
+              status: m.tag,
               tone: "primary",
           }))
         : meetingItems.filter((i) => !i.isDone);
@@ -471,7 +482,14 @@ export default function Home() {
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 activeOpacity={0.85}
-                                                onPress={() => openMapLocation(item.latitude, item.longitude)}
+                                                onPress={() => navigateToLocation({
+                                                    lat: item.latitude,
+                                                    lng: item.longitude,
+                                                    address: item.location,
+                                                    label: item.location || item.projectName,
+                                                    meetingId: item.id,
+                                                    projectId: item.projectId,
+                                                })}
                                                 className="h-8 flex-1 flex-row items-center justify-center rounded-[9px] bg-[#EBF1FF]"
                                             >
                                                 <Ionicons name="location-outline" size={12} color="#4A43EC" />
