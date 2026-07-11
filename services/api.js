@@ -1,5 +1,8 @@
 import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
+let authToken = null;
+export const setAuthToken = (token) => { authToken = token; };
+export const getAuthToken = () => authToken;
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://192.168.0.107:3001';
 
@@ -13,7 +16,7 @@ const api = axios.create({
 
 api.interceptors.request.use(
   async (config) => {
-    const token = await AsyncStorage.getItem('authToken');
+    const token = authToken;
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -40,7 +43,7 @@ export const authAPI = {
   login: async (phone, password) => {
     const { data } = await api.post('/api/v1/field-officer/auth/login', { phone, password });
     if (data.token) {
-      await AsyncStorage.setItem('authToken', data.token);
+      authToken = data.token;
     }
     return data;
   },
@@ -71,7 +74,7 @@ export const authAPI = {
   },
 
   logout: async () => {
-    await AsyncStorage.removeItem('authToken');
+    authToken = null;
   },
 };
 
@@ -211,7 +214,7 @@ export const projectFormApi = {
   // Step 6 — media upload (single file multipart)
   // Using XMLHttpRequest directly — axios has known issues with binary FormData in React Native
   uploadMedia: async (projectId, formData) => {
-    const token = await AsyncStorage.getItem('authToken');
+    const token = authToken;
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${API_BASE_URL}/api/v1/project-panel/form/${projectId}/media`);
@@ -246,6 +249,25 @@ export const projectFormApi = {
   // List all draft projects for current user
   getDraftProjects: () =>
     api.get('/api/v1/project-panel/form/drafts'),
+};
+
+export const kycAPI = {
+  uploadKyc: async (formData) => {
+    const { data } = await api.post('/api/v1/field-officer/kyc', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+  getMyKyc: async () => {
+    const { data } = await api.get('/api/v1/field-officer/kyc');
+    return data;
+  },
+  updateKyc: async (formData) => {
+    const { data } = await api.put('/api/v1/field-officer/kyc', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
 };
 
 export default api;

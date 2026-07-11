@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Ionicons } from "@expo/vector-icons";
 import { setMobile, setPassword, toggleRememberMe, setLoggedIn } from "../../store/slices/authSlice";
-//import { authAPI } from "../../services/api";
+import { authAPI } from "../../services/api";
 const logo = require("../../assets/icons/app-icon.png");
 
 export default function Login() {
@@ -22,9 +22,21 @@ export default function Login() {
 
         setLoading(true);
         try {
-            //const response = await authAPI.login(mobile, password);
-            dispatch(setLoggedIn(true));
-            router.replace("/(tabs)/home");
+            const response = await authAPI.login(mobile, password);
+            const kycStatus = response.user?.kyc_status || 'missing';
+
+            if (kycStatus === 'verified') {
+                dispatch(setLoggedIn(true));
+                router.replace("/(tabs)/home");
+            } else {
+                router.replace({
+                    pathname: "/(auth)/kyc",
+                    params: { 
+                        status: kycStatus, 
+                        rejectionReason: response.user?.rejection_reason || '' 
+                    }
+                });
+            }
         } catch (error) {
             Alert.alert("Login Failed", error.response?.data?.message || "Invalid credentials");
         } finally {
