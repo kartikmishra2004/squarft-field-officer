@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
     Animated,
     Image,
@@ -12,6 +13,7 @@ import {
     useWindowDimensions,
     View,
     Alert,
+    RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useDispatch, useSelector } from "react-redux";
@@ -195,9 +197,28 @@ export default function Home() {
         extrapolate: "clamp",
     });
 
-    // Initial fetch + polling every 30s for real-time updates
+    const [refreshing, setRefreshing] = useState(false);
+
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        try {
+            await dispatch(fetchDashboard());
+        } catch (err) {
+            console.error("Refresh dashboard error:", err);
+        } finally {
+            setRefreshing(false);
+        }
+    }, [dispatch]);
+
+    // Re-fetch dashboard when screen comes into focus
+    useFocusEffect(
+        useCallback(() => {
+            dispatch(fetchDashboard());
+        }, [dispatch])
+    );
+
+    // Polling every 30s for real-time updates when screen is active
     useEffect(() => {
-        dispatch(fetchDashboard());
         const interval = setInterval(() => dispatch(fetchDashboard()), POLL_INTERVAL);
         return () => clearInterval(interval);
     }, [dispatch]);
@@ -378,6 +399,9 @@ export default function Home() {
                     className="flex-1"
                     contentContainerStyle={{ minHeight: 570, paddingBottom: 120, paddingTop: notchHeight + 18 }}
                     showsVerticalScrollIndicator={false}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+                    }
                 >
                     {/* Skeleton cards while loading for the first time */}
                     {loading && !apiMeetings && !apiFollowUps ? (
