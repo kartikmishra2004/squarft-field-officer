@@ -74,12 +74,19 @@ function formatDistance(project) {
 
 function openProjectInMaps(project) {
     const coordinate = getProjectCoordinate(project);
-    const query = coordinate
-        ? `${coordinate.latitude},${coordinate.longitude}`
-        : encodeURIComponent([getProjectName(project), getProjectAddress(project)].filter(Boolean).join(", "));
+    if (!coordinate && !getProjectAddress(project)) {
+        Alert.alert("No Location", "This project does not have any location details.");
+        return;
+    }
 
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`).catch(() => {
-        Alert.alert("Unable to open maps", "Could not open this project in maps.");
+    router.push({
+        pathname: "/projects/navigate",
+        params: {
+            lat: coordinate ? coordinate.latitude : "",
+            lng: coordinate ? coordinate.longitude : "",
+            address: getProjectAddress(project) || "",
+            label: getProjectName(project)
+        }
     });
 }
 

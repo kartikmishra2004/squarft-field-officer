@@ -119,6 +119,8 @@ export default function Profile() {
     const handleQuickLinkPress = (link) => {
         if (link.label === "Map View - Nearby Projects") {
             router.push("/(screens)/nearby-projects");
+        } else if (link.label === "Help & Support") {
+            router.push("/(screens)/support");
         }
     };
 

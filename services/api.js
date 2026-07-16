@@ -39,9 +39,16 @@ api.interceptors.response.use(
   }
 );
 
+const normalizePhone = (phone) => {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+  return phone;
+};
+
 export const authAPI = {
   login: async (phone, password) => {
-    const { data } = await api.post('/api/v1/field-officer/auth/login', { phone, password });
+    const { data } = await api.post('/api/v1/field-officer/auth/login', { phone: normalizePhone(phone), password });
     if (data.token) {
       authToken = data.token;
     }
@@ -50,7 +57,7 @@ export const authAPI = {
 
   register: async (phone, password, full_name, location) => {
     const { data } = await api.post('/api/v1/field-officer/auth/register', {
-      phone,
+      phone: normalizePhone(phone),
       password,
       full_name,
       location: location || null,
@@ -59,7 +66,7 @@ export const authAPI = {
   },
 
   sendOtp: async (phone, purpose) => {
-    const { data } = await api.post('/auth/send-otp', { phone, purpose });
+    const { data } = await api.post('/auth/send-otp', { phone: normalizePhone(phone), purpose });
     return data;
   },
 
@@ -266,6 +273,40 @@ export const kycAPI = {
     const { data } = await api.put('/api/v1/field-officer/kyc', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
+    return data;
+  },
+};
+
+export const tasksAPI = {
+  getMyTasks: async (filters = {}) => {
+    const params = {};
+    if (filters.status && filters.status !== 'all') {
+      params.status = filters.status.toUpperCase();
+    }
+    if (filters.priority) {
+      params.priority = filters.priority.toUpperCase();
+    }
+    const { data } = await api.get('/api/v1/field-officer/tasks', { params });
+    return data;
+  },
+  getTaskById: async (taskId) => {
+    const { data } = await api.get(`/api/v1/field-officer/tasks/${taskId}`);
+    return data;
+  },
+  updateTaskStatus: async (taskId, status, remarks) => {
+    const { data } = await api.patch(`/api/v1/field-officer/tasks/${taskId}/status`, { status, remarks });
+    return data;
+  },
+  markTaskComplete: async (taskId) => {
+    const { data } = await api.patch(`/api/v1/field-officer/tasks/${taskId}/complete`);
+    return data;
+  },
+  addTaskRemark: async (taskId, remark) => {
+    const { data } = await api.post(`/api/v1/field-officer/tasks/${taskId}/remarks`, { remark });
+    return data;
+  },
+  getTaskSummary: async () => {
+    const { data } = await api.get('/api/v1/field-officer/tasks/summary');
     return data;
   },
 };

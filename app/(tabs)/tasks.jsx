@@ -1,44 +1,113 @@
 import { Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
-import { useMemo, useState } from "react";
-import { Linking, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { router } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Alert, Linking, RefreshControl, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { fieldOfficerTasks, taskStatusFilters } from "../../data/tasksData";
+import { taskStatusFilters } from "../../data/tasksData";
+import { tasksAPI } from "../../services/api";
 
 const PURPLE = "#4A43EC";
 
 const priorityColors = {
-    High: "#B91C1C",
-    Medium: "#B45309",
-    Low: "#2563EB",
+    HIGH: "#B91C1C",
+    URGENT: "#B91C1C",
+    NORMAL: "#B45309",
+    LOW: "#2563EB",
 };
 
-function openMapLocation(tracking) {
-    if (!tracking?.latitude || !tracking?.longitude) return;
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${tracking.latitude},${tracking.longitude}`).catch(() => {});
+const priorityLabels = {
+    HIGH: "High",
+    URGENT: "Urgent",
+    NORMAL: "Medium",
+    LOW: "Low",
+};
+
+const statusLabels = {
+    ASSIGNED: "Scheduled",
+    IN_PROGRESS: "In Progress",
+    COMPLETED: "Completed",
+    CANCELLED: "Cancelled",
+    OVERDUE: "Overdue",
+};
+
+function openMapLocation(latitude, longitude) {
+    if (!latitude || !longitude) return;
+    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`).catch(() => {});
 }
+
+const handleNavigate = (task) => {
+    if (!task.latitude && !task.longitude && !task.location) {
+        Alert.alert("No Location", "This task does not have any location details.");
+        return;
+    }
+    router.push({
+        pathname: "/projects/navigate",
+        params: {
+            lat: task.latitude || "",
+            lng: task.longitude || "",
+            address: task.location || "",
+            label: task.projectName || task.title || "Task Location"
+        }
+    });
+};
+
+const isToday = (dateStr) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    const today = new Date();
+    return d.getDate() === today.getDate() &&
+           d.getMonth() === today.getMonth() &&
+           d.getFullYear() === today.getFullYear();
+};
 
 export default function Tasks() {
     const [activeFilter, setActiveFilter] = useState("all");
-    const [tasks, setTasks] = useState(fieldOfficerTasks);
+    const [tasks, setTasks] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+
+    const fetchTasks = async (isSilent = false) => {
+        if (!isSilent) setLoading(true);
+        else setRefreshing(true);
+        try {
+            const res = await tasksAPI.getMyTasks();
+            const list = res.data?.tasks || res.tasks || res.data || [];
+            setTasks(list);
+        } catch (err) {
+            console.log("Error fetching tasks:", err?.response?.data || err.message);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchTasks();
+    }, []);
 
     const filteredTasks = useMemo(() => {
         if (activeFilter === "all") return tasks;
-        if (activeFilter === "today") return tasks.filter((task) => task.due === "Today");
-        if (activeFilter === "open") return tasks.filter((task) => task.status !== "Completed");
-        return tasks.filter((task) => task.status === "Completed");
+        if (activeFilter === "today") return tasks.filter((task) => task.due?.toLowerCase() === "today" || isToday(task.timeline));
+        if (activeFilter === "open") return tasks.filter((task) => task.status !== "COMPLETED");
+        return tasks.filter((task) => task.status === "COMPLETED");
     }, [activeFilter, tasks]);
 
-    const openTasks = tasks.filter((task) => task.status !== "Completed").length;
+    const openTasks = tasks.filter((task) => task.status !== "COMPLETED").length;
 
-    const markComplete = (taskId) => {
-        setTasks((currentTasks) =>
-            currentTasks.map((task) =>
-                task.id === taskId
-                    ? { ...task, status: "Completed", managerValidation: "Ready for final closure" }
-                    : task
-            )
-        );
+    const markComplete = async (taskId) => {
+        try {
+            await tasksAPI.markTaskComplete(taskId);
+            setTasks((currentTasks) =>
+                currentTasks.map((task) =>
+                    task.id === taskId
+                        ? { ...task, status: "COMPLETED", managerValidation: "Ready for final closure" }
+                        : task
+                )
+            );
+        } catch (err) {
+            console.log("Error completing task:", err?.response?.data || err.message);
+        }
     };
 
     return (
@@ -50,9 +119,6 @@ export default function Tasks() {
                         <View>
                             <Text className="text-[20px] font-lato-bold text-white">Tasks</Text>
                             <Text className="mt-1 text-[12px] text-white/75">{openTasks} open tasks</Text>
-                        </View>
-                        <View className="h-10 w-10 items-center justify-center rounded-[10px] bg-white/15">
-                            <Ionicons name="checkbox-outline" size={21} color="#fff" />
                         </View>
                     </View>
                 </View>
@@ -85,9 +151,16 @@ export default function Tasks() {
                         className="flex-1"
                         contentContainerStyle={{ paddingBottom: 108, paddingHorizontal: 16, paddingTop: 12 }}
                         showsVerticalScrollIndicator={false}
+                        refreshControl={
+                            <RefreshControl refreshing={refreshing} onRefresh={() => fetchTasks(true)} colors={[PURPLE]} />
+                        }
                     >
-                        {filteredTasks.map((task) => {
-                            const isCompleted = task.status === "Completed";
+                        {loading ? (
+                            <View className="mt-20 items-center justify-center">
+                                <ActivityIndicator size="large" color={PURPLE} />
+                            </View>
+                        ) : filteredTasks.map((task) => {
+                            const isCompleted = task.status === "COMPLETED";
 
                             return (
                                 <View
@@ -100,27 +173,29 @@ export default function Tasks() {
                                                 {task.title}
                                             </Text>
                                             <Text className="mt-1 text-[11px] text-[#64748B]" numberOfLines={1}>
-                                                {task.projectName} - {task.location}
+                                                {task.projectName || "No Project"} - {task.location || "No Location"}
                                             </Text>
                                         </View>
-                                        <Text className="text-[10px] font-lato-bold text-[#4A43EC]">{task.status}</Text>
+                                        <Text className="text-[10px] font-lato-bold text-[#4A43EC]">
+                                            {statusLabels[task.status] || task.status}
+                                        </Text>
                                     </View>
 
                                     <View className="mt-3 flex-row items-center justify-between">
                                         <View className="flex-row items-center">
                                             <Ionicons name="time-outline" size={13} color="#64748B" />
                                             <Text className="ml-1.5 text-[11px] font-semibold text-[#475569]">
-                                                {task.due}, {task.time}
+                                                {task.due || "No Due Date"}{task.time ? `, ${task.time}` : ""}
                                             </Text>
                                             <View className="mx-2 h-1 w-1 rounded-full bg-[#CBD5E1]" />
                                             <Text className="text-[11px] font-lato-bold" style={{ color: priorityColors[task.priority] ?? "#475569" }}>
-                                                {task.priority}
+                                                {priorityLabels[task.priority] || task.priority}
                                             </Text>
                                         </View>
                                         <View className="flex-row items-center">
                                             <TouchableOpacity
                                                 activeOpacity={0.8}
-                                                onPress={() => openMapLocation(task.tracking)}
+                                                onPress={() => handleNavigate(task)}
                                                 className="mr-2 h-8 w-8 items-center justify-center rounded-[8px] bg-[#EBF1FF]"
                                             >
                                                 <Ionicons name="location-outline" size={14} color={PURPLE} />
@@ -134,7 +209,7 @@ export default function Tasks() {
                                                 }`}
                                             >
                                                 <Text className={`text-[11px] font-lato-bold ${isCompleted ? "text-[#16A34A]" : "text-white"}`}>
-                                                    {isCompleted ? "Done" : "Done"}
+                                                    Done
                                                 </Text>
                                             </TouchableOpacity>
                                         </View>
@@ -143,7 +218,7 @@ export default function Tasks() {
                             );
                         })}
 
-                        {!filteredTasks.length && (
+                        {!loading && !filteredTasks.length && (
                             <View className="mt-16 items-center">
                                 <Ionicons name="checkmark-done-outline" size={28} color="#CBD5E1" />
                                 <Text className="mt-3 text-[14px] font-lato-bold text-[#64748B]">No tasks here</Text>

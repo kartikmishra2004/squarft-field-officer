@@ -19,7 +19,7 @@ const dashboardSlice = createSlice({
         profile: null,
         metrics: null,
         tasks: null,
-        loading: false,
+        loading: true,
         error: null,
     },
     reducers: {},

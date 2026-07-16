@@ -42,30 +42,30 @@ const meetingToneStyles = {
 };
 
 // Shimmer skeleton component
-function Skeleton({ width, height, borderRadius = 8, style }) {
+function Skeleton({ width, height, borderRadius = 8, style, color = "#E2E8F0" }) {
     const shimmer = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
         Animated.loop(
             Animated.sequence([
-                Animated.timing(shimmer, { toValue: 1, duration: 900, useNativeDriver: true }),
-                Animated.timing(shimmer, { toValue: 0, duration: 900, useNativeDriver: true }),
+                Animated.timing(shimmer, { toValue: 1, duration: 800, useNativeDriver: true }),
+                Animated.timing(shimmer, { toValue: 0, duration: 800, useNativeDriver: true }),
             ])
         ).start();
     }, [shimmer]);
 
-    const opacity = shimmer.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.75] });
+    const opacity = shimmer.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.8] });
 
     return (
         <Animated.View
-            style={[{ width, height, borderRadius, backgroundColor: "#E5E7EB", opacity }, style]}
+            style={[{ width, height, borderRadius, backgroundColor: color, opacity }, style]}
         />
     );
 }
 
 function HeaderSkeleton() {
     return (
-        <View className="px-4 pb-[15px] pt-2">
+        <View className="px-4 pb-[15px] pt-2 bg-white">
             <View className="flex-row items-center justify-between">
                 <View className="flex-row items-center">
                     <Skeleton width={48} height={48} borderRadius={12} />
@@ -76,13 +76,13 @@ function HeaderSkeleton() {
                 </View>
                 <Skeleton width={32} height={32} borderRadius={16} />
             </View>
-            <View className="mt-5 flex-row justify-between rounded-[15px] bg-white px-5 py-3.5"
+            <View className="mt-5 flex-row justify-between rounded-[15px] bg-[#F8FAFC] px-5 py-3.5"
                 style={{ shadowColor: "#000", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.06, shadowRadius: 16.5, elevation: 4 }}
             >
                 {[0, 1, 2, 3].map((i) => (
                     <View key={i} className="h-[75px] w-[75px] items-center justify-center rounded-[15px] bg-[#EBF1FF]">
-                        <Skeleton width={28} height={14} style={{ marginBottom: 8 }} />
-                        <Skeleton width={44} height={10} />
+                        <Skeleton width={28} height={14} color="#C4D7FF" style={{ marginBottom: 8 }} />
+                        <Skeleton width={44} height={10} color="#C4D7FF" />
                     </View>
                 ))}
             </View>
@@ -92,18 +92,18 @@ function HeaderSkeleton() {
 
 function CardSkeleton() {
     return (
-        <View className="mb-2 rounded-[12px] border border-[#EEF0F4] bg-white px-3 py-2.5"
+        <View className="mb-3 rounded-[12px] border border-[#EEF0F4] bg-white p-3.5"
             style={{ shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 1 }}
         >
             <View className="flex-row items-start justify-between">
-                <View className="flex-1 mr-2">
-                    <Skeleton width="70%" height={12} style={{ marginBottom: 6 }} />
-                    <Skeleton width="50%" height={10} />
+                <View className="flex-1 mr-3">
+                    <Skeleton width="65%" height={13} style={{ marginBottom: 6 }} />
+                    <Skeleton width="45%" height={10} />
                 </View>
-                <Skeleton width={52} height={18} borderRadius={20} />
+                <Skeleton width={56} height={18} borderRadius={20} />
             </View>
-            <Skeleton width="100%" height={36} borderRadius={9} style={{ marginTop: 8 }} />
-            <View className="mt-2 flex-row">
+            <Skeleton width="100%" height={38} borderRadius={9} style={{ marginTop: 10 }} />
+            <View className="mt-3 flex-row">
                 <Skeleton width="48%" height={32} borderRadius={9} style={{ marginRight: 8 }} />
                 <Skeleton width="48%" height={32} borderRadius={9} />
             </View>

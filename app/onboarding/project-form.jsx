@@ -47,6 +47,8 @@ import { projectFormApi, leadsAPI } from "../../services/api";
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
+import MapView, { PROVIDER_GOOGLE } from "react-native-maps";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
 
@@ -1489,6 +1491,26 @@ function Step1({ errors = {}, setErrors }) {
     const dispatch = useDispatch();
     const { step1 } = useSelector((state) => state.project);
     const [fetchingLocation, setFetchingLocation] = useState(false);
+    const [mapModalVisible, setMapModalVisible] = useState(false);
+    const [mapRegion, setMapRegion] = useState({
+        latitude: 22.7196,
+        longitude: 75.8577,
+        latitudeDelta: 0.005,
+        longitudeDelta: 0.005,
+    });
+    const [markerCoordinate, setMarkerCoordinate] = useState({
+        latitude: 22.7196,
+        longitude: 75.8577,
+    });
+    const [resolvingAddress, setResolvingAddress] = useState(false);
+    const [previewAddress, setPreviewAddress] = useState("");
+    const [tempAddressDetails, setTempAddressDetails] = useState({
+        location: "",
+        city: "",
+        state: "",
+        pincode: "",
+    });
+    const mapRef = useRef(null);
 
     const updateField = (field, value) => {
         dispatch(updateStep1({ [field]: value }));
@@ -1502,7 +1524,46 @@ function Step1({ errors = {}, setErrors }) {
         }
     };
 
-    const fetchCurrentLocation = async () => {
+    const reverseGeocode = async (latitude, longitude) => {
+        setResolvingAddress(true);
+        try {
+            const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
+            if (address) {
+                const parts = [address.name, address.street, address.district].filter(Boolean);
+                const fullLocation = parts.join(', ') || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+                setPreviewAddress(fullLocation);
+                setTempAddressDetails({
+                    location: fullLocation,
+                    city: address.city || address.subregion || "",
+                    state: address.region || "",
+                    pincode: address.postalCode || "",
+                });
+            } else {
+                const fallback = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+                setPreviewAddress(fallback);
+                setTempAddressDetails({
+                    location: fallback,
+                    city: "",
+                    state: "",
+                    pincode: "",
+                });
+            }
+        } catch (err) {
+            console.warn("Reverse geocoding error:", err);
+            const fallback = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+            setPreviewAddress(fallback);
+            setTempAddressDetails({
+                location: fallback,
+                city: "",
+                state: "",
+                pincode: "",
+            });
+        } finally {
+            setResolvingAddress(false);
+        }
+    };
+
+    const openMapPicker = async () => {
         setFetchingLocation(true);
         try {
             const { granted } = await Location.requestForegroundPermissionsAsync();
@@ -1510,46 +1571,54 @@ function Step1({ errors = {}, setErrors }) {
                 alert("Location permission denied. Please allow location access.");
                 return;
             }
-            let loc;
+            let lat = 22.7196;
+            let lng = 75.8577;
             try {
-                loc = await Location.getCurrentPositionAsync({
+                const loc = await Location.getCurrentPositionAsync({
                     accuracy: Location.Accuracy.Balanced,
                     timeout: 7000,
                 });
+                lat = loc.coords.latitude;
+                lng = loc.coords.longitude;
             } catch (posErr) {
-                console.warn("Failed to get current location coordinates, using default Indore coordinates:", posErr.message);
-                loc = {
-                    coords: {
-                        latitude: 22.7196,
-                        longitude: 75.8577,
-                    }
-                };
+                console.warn("Failed to get current location coordinates, using default:", posErr.message);
             }
 
-            const [address] = await Location.reverseGeocodeAsync({
-                latitude: loc.coords.latitude,
-                longitude: loc.coords.longitude,
+            const initialCoord = { latitude: lat, longitude: lng };
+            setMarkerCoordinate(initialCoord);
+            setMapRegion({
+                latitude: lat,
+                longitude: lng,
+                latitudeDelta: 0.005,
+                longitudeDelta: 0.005,
             });
-            if (address) {
-                const parts = [address.name, address.street, address.district].filter(Boolean);
-                const fullLocation = parts.join(', ') || `${loc.coords.latitude.toFixed(5)}, ${loc.coords.longitude.toFixed(5)}`;
-                updateField('location', fullLocation);
-                if (address.city || address.subregion)  updateField('city',  address.city || address.subregion || '');
-                if (address.region)                      updateField('state', address.region || '');
-                if (address.postalCode)                  updateField('pincode', address.postalCode || '');
-            } else {
-                updateField('location', `${loc.coords.latitude.toFixed(5)}, ${loc.coords.longitude.toFixed(5)}`);
-                updateField('city', 'Indore');
-                updateField('state', 'Madhya Pradesh');
-                updateField('pincode', '452001');
-            }
+            setMapModalVisible(true);
+            reverseGeocode(lat, lng);
         } catch (e) {
-            console.error("fetchCurrentLocation Error:", e);
-            alert("Could not fetch location. Try again.");
+            console.error("openMapPicker Error:", e);
+            alert("Could not load map.");
         } finally {
             setFetchingLocation(false);
         }
     };
+
+    const handleConfirmLocation = () => {
+        updateField('location', tempAddressDetails.location);
+        if (tempAddressDetails.city) updateField('city', tempAddressDetails.city);
+        if (tempAddressDetails.state) updateField('state', tempAddressDetails.state);
+        if (tempAddressDetails.pincode) updateField('pincode', tempAddressDetails.pincode);
+        setMapModalVisible(false);
+    };
+
+    const handleMapRegionChangeComplete = (region) => {
+        const coordinate = {
+            latitude: region.latitude,
+            longitude: region.longitude,
+        };
+        setMarkerCoordinate(coordinate);
+        reverseGeocode(region.latitude, region.longitude);
+    };
+
     const projectNameRef = useRef(null);
     const locationRef = useRef(null);
     const cityRef = useRef(null);
@@ -1560,9 +1629,77 @@ function Step1({ errors = {}, setErrors }) {
     const respNameRef = useRef(null);
     const respContactRef = useRef(null);
 
-
     return (
         <View className="gap-6">
+            {/* Map Picker Modal */}
+            <Modal
+                animationType="slide"
+                transparent={false}
+                visible={mapModalVisible}
+                onRequestClose={() => setMapModalVisible(false)}
+            >
+                <SafeAreaView className="flex-1 bg-white" edges={["top", "bottom"]}>
+                    {/* Modal Header */}
+                    <View className="flex-row items-center border-b border-gray-100 px-4 py-3 bg-white justify-between">
+                        <TouchableOpacity
+                            onPress={() => setMapModalVisible(false)}
+                            className="h-8 w-8 items-center justify-center rounded-lg bg-gray-100"
+                        >
+                            <Ionicons name="close" size={18} color="#111827" />
+                        </TouchableOpacity>
+                        <Text className="text-[15px] font-lato-bold text-[#0F172A]">Pick Project Location</Text>
+                        <View style={{ width: 32 }} />
+                    </View>
+
+                    {/* Map Area */}
+                    <View className="flex-1 relative">
+                        <MapView
+                            ref={mapRef}
+                            provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
+                            initialRegion={mapRegion}
+                            onRegionChangeComplete={handleMapRegionChangeComplete}
+                            style={{ flex: 1 }}
+                            showsUserLocation
+                            showsMyLocationButton
+                        />
+
+                        {/* Fixed Center Pin */}
+                        <View
+                            pointerEvents="none"
+                            className="absolute inset-0 items-center justify-center"
+                            style={{ top: -20 }}
+                        >
+                            <View className="h-11 w-11 items-center justify-center rounded-full bg-white shadow-lg border border-gray-100">
+                                {resolvingAddress ? (
+                                    <ActivityIndicator color="#4A43EC" size="small" />
+                                ) : (
+                                    <Ionicons name="location" size={26} color="#4A43EC" />
+                                )}
+                            </View>
+                            <View className="h-1.5 w-1.5 rounded-full bg-[#4A43EC]/40 mt-1" />
+                        </View>
+
+                        {/* Bottom Floating Card */}
+                        <View className="absolute bottom-5 left-4 right-4 bg-white rounded-2xl p-4 shadow-xl border border-gray-100">
+                            <Text className="text-[10px] font-lato-bold uppercase tracking-[1px] text-gray-400 mb-1">Pinpoint Location Address</Text>
+                            <Text className="text-xs font-lato-bold text-gray-800 leading-5 mb-4" numberOfLines={2}>
+                                {resolvingAddress ? "Resolving address details..." : previewAddress || "Pin point location on the map..."}
+                            </Text>
+
+                            <TouchableOpacity
+                                onPress={handleConfirmLocation}
+                                disabled={resolvingAddress}
+                                className="h-12 w-full bg-[#4A43EC] rounded-xl flex-row items-center justify-center"
+                                style={resolvingAddress ? { opacity: 0.6 } : null}
+                            >
+                                <Ionicons name="checkmark-circle-outline" size={16} color="white" />
+                                <Text className="text-white text-xs font-lato-bold ml-1.5">Confirm Pin Location</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </SafeAreaView>
+            </Modal>
+
             {/* Project Name */}
             <View>
                 <Text className="text-xs font-lato-bold text-black mb-1.5">Project Name</Text>
@@ -1596,14 +1733,14 @@ function Step1({ errors = {}, setErrors }) {
                         style={{ paddingVertical: 0, textAlignVertical: 'center', includeFontPadding: false }}
                     />
                     <TouchableOpacity
-                        onPress={fetchCurrentLocation}
+                        onPress={openMapPicker}
                         disabled={fetchingLocation}
                         activeOpacity={0.7}
                         className="w-7 h-7 rounded-lg bg-[#EBEAFF] items-center justify-center"
                     >
                         {fetchingLocation
                             ? <ActivityIndicator size={12} color="#4A43EC" />
-                            : <Ionicons name="locate" size={16} color="#4A43EC" />
+                            : <Ionicons name="map-outline" size={15} color="#4A43EC" />
                         }
                     </TouchableOpacity>
                 </Pressable>
