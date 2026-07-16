@@ -153,6 +153,8 @@ function resetLeadForm() {
         area: "",
         colony: "",
         fullAddress: "",
+        state: "",
+        pincode: "",
         builderNotes: "",
         followUpDate: "",
         followUpISO: null,
@@ -248,12 +250,16 @@ function getLocationFieldsFromAddress(address, coordinate) {
         area,
     ]);
     const fullAddress = formatReverseGeocodedAddress(address) || formatCoordinateAddress(coordinate);
+    const state = address?.region || "";
+    const pincode = address?.postalCode || "";
 
     return {
         city,
         area,
         colony,
         fullAddress,
+        state,
+        pincode,
     };
 }
 
@@ -284,17 +290,17 @@ function Chip({ label, active, onPress }) {
             className={`mb-2 mr-2 h-9 items-center justify-center rounded-full px-4 ${
                 active ? "bg-[#4A43EC]" : "border border-gray-200 bg-white"
             }`}
-            style={
-                active
-                    ? {
-                          shadowColor: "#4A43EC",
-                          shadowOffset: { width: 0, height: 3 },
-                          shadowOpacity: 0.14,
-                          shadowRadius: 6,
-                          elevation: 2,
-                      }
-                    : null
-            }
+            style={{
+                borderRadius: 9999,
+                outlineWidth: 0,
+                ...(active ? {
+                    shadowColor: "#4A43EC",
+                    shadowOffset: { width: 0, height: 3 },
+                    shadowOpacity: 0.14,
+                    shadowRadius: 6,
+                    elevation: 2,
+                } : {})
+            }}
         >
             <Text className={`text-xs font-lato-bold ${active ? "text-white" : "text-gray-600"}`}>
                 {label}
@@ -471,6 +477,7 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
     const [category, setCategory] = useState("Residential");
     const [projectType, setProjectType] = useState("");
     const [subType, setSubType] = useState("");
+    const [selectedTypes, setSelectedTypes] = useState([]);
     const [showSubTypeDropdown, setShowSubTypeDropdown] = useState(false);
     const [leadStage, setLeadStage] = useState("New Lead");
     const [interactionType, setInteractionType] = useState("Call");
@@ -543,6 +550,8 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                 area: locationFields.area || current.area,
                 colony: locationFields.colony || current.colony,
                 fullAddress: locationFields.fullAddress,
+                state: locationFields.state || current.state,
+                pincode: locationFields.pincode || current.pincode,
             }));
             setMapMessage("Location fields updated from the selected map point.");
         } catch {
@@ -699,6 +708,30 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
         });
     };
 
+    const handleAddPropertyType = () => {
+        if (!category || !projectType) return;
+
+        const exists = selectedTypes.find(
+            (t) => t.category === category && t.projectType === projectType && t.subType === subType
+        );
+        if (exists) {
+            Alert.alert("Already added", "This property type combination is already added.");
+            return;
+        }
+
+        setSelectedTypes((prev) => [
+            ...prev,
+            {
+                id: Date.now().toString(),
+                category,
+                projectType,
+                subType,
+            },
+        ]);
+        setProjectType("");
+        setSubType("");
+    };
+
     const nextStep = () => {
         if (currentStep < steps.length - 1) {
             setCurrentStep(currentStep + 1);
@@ -727,21 +760,36 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
             return;
         }
 
+        if (selectedTypes.length === 0) {
+            Alert.alert("Missing property type", "Please add at least one property type configuration.");
+            return;
+        }
+
         // Use pre-computed ISO string set during time selection
         const scheduled_time = form.followUpISO || null;
+
+        const property_types = selectedTypes.map((t) => ({
+            main_type: t.category,
+            sub_type: t.projectType,
+            configuration: t.subType || null,
+        }));
+        const primaryType = selectedTypes[0] || {};
 
         const payload = {
             project_name: projectName,
             builder_name: developerName,
             contact_person: form.contactPerson.trim() || null,
             contact_number: phoneNumber,
-            property_category: category || null,
-            property_subtype: projectType || null,
-            configuration: subType || null,
+            property_category: primaryType.category || null,
+            property_subtype: primaryType.projectType || null,
+            configuration: primaryType.subType || null,
+            property_types,
             city: form.city.trim() || null,
             area: form.area.trim() || null,
             colony_landmark: form.colony.trim() || null,
             full_address: form.fullAddress.trim() || null,
+            state: form.state.trim() || null,
+            pincode: form.pincode.trim() || null,
             stage: 'new_lead',
             interaction_type: interactionType || null,
             remarks: form.builderNotes.trim() || null,
@@ -755,6 +803,30 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
             const response = await leadsAPI.createLead(payload);
 
             // Optimistic local Redux update for instant UI
+            const newFollowUpId = String(Date.now());
+            const localFollowUps = scheduled_time ? [
+                {
+                    id: newFollowUpId,
+                    projectId: response.data?.id?.toString() || createProjectId(projectName),
+                    time: new Date(scheduled_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+                    note: form.builderNotes.trim() || 'Initial follow-up scheduled.',
+                    status: priority,
+                    tone: priority.toLowerCase() === "hot" ? "hot" : "warning",
+                    isDone: false,
+                    voice_note_url: voiceNoteUri || null,
+                    site_photo_url: null,
+                    meta: {
+                        followUpType: (interactionType && ['Call', 'Site Visit', 'Office Visit', 'Reference'].includes(interactionType))
+                            ? interactionType.toLowerCase().replace(' ', '_')
+                            : 'call',
+                        outcome: 'connected',
+                        followUpStatus: priority.toLowerCase(),
+                        nextAction: 'schedule_another_call',
+                        nextFollowUpAt: scheduled_time,
+                    }
+                }
+            ] : [];
+
             dispatch(
                 addProject({
                     id: response.data?.id?.toString() || createProjectId(projectName),
@@ -767,8 +839,10 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                     area: form.area.trim(),
                     colony: form.colony.trim(),
                     fullAddress: form.fullAddress.trim(),
-                    category,
-                    projectType: [category, projectType, subType].filter(Boolean).join(" . "),
+                    state: form.state.trim(),
+                    pincode: form.pincode.trim(),
+                    category: primaryType.category || "",
+                    projectType: selectedTypes.map(t => [t.category, t.projectType, t.subType].filter(Boolean).join(" - ")).join(" | "),
                     type: priority,
                     status: "New Lead",
                     statusType: "newLead",
@@ -783,7 +857,7 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                     voiceNoteUri,
                     voiceNoteDuration,
                     journeyStage: "New Lead Added",
-                    followUps: [],
+                    followUps: localFollowUps,
                     meetings: [],
                 }),
             );
@@ -796,6 +870,7 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
             setCategory("Residential");
             setProjectType("");
             setSubType("");
+            setSelectedTypes([]);
             setLeadStage("New Lead");
             setInteractionType("Call");
             setPriority("Hot");
@@ -1066,6 +1141,36 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 />
                             </View>
 
+                            {/* Selected property types list */}
+                            {selectedTypes.length > 0 && (
+                                <View className="mb-2">
+                                    <Text className="text-xs font-lato-bold text-black mb-2">Added Property Types ({selectedTypes.length})</Text>
+                                    {selectedTypes.map((item) => {
+                                        const typeIcon = subTypesData[item.category]?.find(t => t.id === item.projectType)?.image;
+                                        return (
+                                            <View key={item.id} className="bg-[#F8F9FE] border border-gray-100 rounded-xl px-4 py-2.5 flex-row justify-between items-center mb-2">
+                                                <View className="flex-row items-center flex-1">
+                                                    <View className="w-10 h-10 bg-white rounded-xl items-center justify-center mr-3 border border-gray-50">
+                                                        {typeIcon && <Image source={typeIcon} className="w-6 h-6" resizeMode="contain" />}
+                                                    </View>
+                                                    <View className="justify-center">
+                                                        <Text className="font-lato-bold text-black text-[12px] leading-tight">
+                                                            {item.projectType} {item.subType ? `(${item.subType})` : ''}
+                                                        </Text>
+                                                        <Text className="text-[10px] text-[#4A43EC] font-lato-bold uppercase mt-0.5 leading-tight">
+                                                            {item.category}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+                                                <TouchableOpacity onPress={() => setSelectedTypes(prev => prev.filter(t => t.id !== item.id))} className="p-1">
+                                                    <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                                                </TouchableOpacity>
+                                            </View>
+                                        );
+                                    })}
+                                </View>
+                            )}
+
                             <Text className="text-xs font-lato-bold text-black">Property Category</Text>
                             <View className="flex-row justify-between">
                                 {mainTypes.map((item) => (
@@ -1102,6 +1207,18 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                 onSelect={selectSubType}
                             />
 
+                            {Boolean(projectType && (!subTypeOptions[projectType] || subType)) && (
+                                <TouchableOpacity
+                                    activeOpacity={0.8}
+                                    onPress={handleAddPropertyType}
+                                    className="items-center justify-center rounded-xl bg-[#4A43EC]/10 border border-[#4A43EC]/20 py-3 mt-1 mb-2"
+                                >
+                                    <Text className="text-xs font-lato-bold text-[#4A43EC]">
+                                        + Add Property Type
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
+
                             <TouchableOpacity
                                 activeOpacity={0.86}
                                 onPress={nextStep}
@@ -1135,6 +1252,24 @@ export default function ProjectLeadFormSheet({ visible, translateY, screenHeight
                                     value={form.area}
                                     onChangeText={setField("area")}
                                     containerClassName="flex-1"
+                                />
+                            </View>
+
+                            <View className="mb-4 flex-row" style={{ columnGap: 10 }}>
+                                <Field
+                                    label="State"
+                                    placeholder="Madhya Pradesh"
+                                    value={form.state}
+                                    onChangeText={setField("state")}
+                                    containerClassName="flex-1"
+                                />
+                                <Field
+                                    label="Pincode"
+                                    placeholder="452010"
+                                    value={form.pincode}
+                                    onChangeText={setField("pincode")}
+                                    containerClassName="flex-1"
+                                    keyboardType="numeric"
                                 />
                             </View>
 

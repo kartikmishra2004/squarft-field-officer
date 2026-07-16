@@ -80,6 +80,7 @@ const projectJourneyTemplate = [
     "Follow-up",
     "Meeting Scheduled",
     "Interested",
+    "In-Review",
     "Project live",
 ];
 const rejectedProjectJourneyTemplate = [
@@ -88,6 +89,7 @@ const rejectedProjectJourneyTemplate = [
     "Follow-up",
     "Meeting Scheduled",
     "Interested",
+    "In-Review",
     "Rejected",
 ];
 const defaultProjectJourneyStage = "New Lead Added";
@@ -1211,6 +1213,7 @@ const stageDisplayMap = {
     follow_up: "Follow-up",
     meeting_scheduled: "Meeting Scheduled",
     interested: "Interested",
+    in_review: "In-Review",
     project_live: "Project live",
     rejected: "Rejected",
 };
@@ -1284,7 +1287,19 @@ const normalizeApiLead = (d, journey = [], follow_ups = [], meetings = []) => {
         colony: d.colony_landmark || "",
         fullAddress: d.full_address || "",
         category: d.property_category || "",
-        projectType: [d.property_category, d.property_subtype, d.configuration].filter(Boolean).join(" . "),
+        projectType: (() => {
+            let pts = d.property_types;
+            if (typeof pts === "string") {
+                try {
+                    pts = JSON.parse(pts);
+                } catch {
+                    pts = null;
+                }
+            }
+            return pts && Array.isArray(pts) && pts.length > 0
+                ? pts.map(t => [t.main_type || t.category, t.sub_type || t.projectType, t.configuration || t.subType].filter(Boolean).join(" - ")).join(" | ")
+                : [d.property_category, d.property_subtype, d.configuration].filter(Boolean).join(" . ");
+        })(),
         type: d.lead_temperature
             ? d.lead_temperature.charAt(0).toUpperCase() + d.lead_temperature.slice(1)
             : "Warm",
@@ -1381,7 +1396,7 @@ export default function ProjectDetail() {
     }, [projectId, reduxProject]);
 
     const project = useMemo(
-        () => reduxProject || apiProject,
+        () => apiProject || reduxProject,
         [reduxProject, apiProject],
     );
     const renderBackdrop = useCallback(

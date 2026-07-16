@@ -17,6 +17,7 @@ const stageMap = {
     followUp: "follow_up",
     meeting: "meeting_scheduled",
     interested: "interested",
+    inReview: "in_review",
     live: "project_live",
     rejected: "rejected",
 };
@@ -28,6 +29,7 @@ const stageStyles = {
     follow_up:          { label: "Follow Up",  bg: "#FFF7ED", text: "#EA580C" },
     meeting_scheduled:  { label: "Meeting",    bg: "#F1EFFF", text: "#4A43EC" },
     interested:         { label: "Interested", bg: "#DCFCE7", text: "#16A34A" },
+    in_review:          { label: "In Review",  bg: "#FEF9C3", text: "#854D0E" },
     project_live:       { label: "Live",       bg: "#DCFCE7", text: "#16A34A" },
     rejected:           { label: "Rejected",   bg: "#FEE2E2", text: "#B91C1C" },
 };

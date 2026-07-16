@@ -258,12 +258,67 @@ export default function AddProject() {
                     projectName: existingProject.projectName || "",
                     location: existingProject.fullAddress || existingProject.location || "",
                     city: existingProject.city || "",
+                    state: existingProject.state || "",
+                    pincode: existingProject.pincode || "",
                     salesOfficerName: existingProject.contactPerson || "",
-                    salesOfficerContact: existingProject.phoneNumber || "",
+                    salesOfficerContact: (existingProject.phoneNumber || "").replace(/^\+91/, ""),
                     responsiblePersonName: existingProject.contactPerson || existingProject.developerName || "",
-                    responsiblePersonContact: existingProject.phoneNumber || "",
+                    responsiblePersonContact: (existingProject.phoneNumber || "").replace(/^\+91/, ""),
                 }),
             );
+
+            const seen = new Set();
+            const finalPts = [];
+            let pts = existingProject.property_types;
+            console.log("[Prefill Cache] Raw property_types from Redux cache:", existingProject.property_types);
+            if (typeof pts === 'string') {
+                try {
+                    pts = JSON.parse(pts);
+                } catch (e) {
+                    console.log("[Prefill Cache] Error parsing JSON string:", e);
+                    pts = [];
+                }
+            }
+            console.log("[Prefill Cache] Parsed property_types array:", pts);
+            if (Array.isArray(pts) && pts.length > 0) {
+                pts.forEach(pt => {
+                    finalPts.push({
+                        main_type: pt.main_type || pt.category,
+                        sub_type: pt.sub_type || pt.projectType,
+                    });
+                });
+            } else if (existingProject.category) {
+                const parts = String(existingProject.projectType || "").split(" | ")[0]?.split(" - ");
+                if (parts && parts.length >= 2) {
+                    finalPts.push({
+                        main_type: parts[0]?.trim(),
+                        sub_type: parts[1]?.trim()
+                    });
+                } else {
+                    finalPts.push({
+                        main_type: existingProject.category,
+                        sub_type: existingProject.projectType
+                    });
+                }
+            }
+
+            console.log("[Prefill Cache] Final mapped property_types to dispatch:", finalPts);
+            finalPts.forEach((pt, index) => {
+                if (!pt.main_type || !pt.sub_type) return;
+                const mainType = String(pt.main_type).toLowerCase() === 'commercial' ? 'commercial' : 'residential';
+                const subType = String(pt.sub_type).toLowerCase();
+                const key = `${mainType}_${subType}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    console.log(`[Prefill Cache] Dispatching addPropertyType for key: ${key}, mainType: ${mainType}, subType: ${subType}`);
+                    dispatch(addPropertyType({
+                        id: `lead_${mainType}_${subType}_${index}_${Math.random().toString(36).substring(2, 9)}`,
+                        mainType,
+                        subType
+                    }));
+                }
+            });
+
             dispatch(setStep(1));
             // No projectId yet — createDraft will set it
             setDraftReady(true);
@@ -273,9 +328,10 @@ export default function AddProject() {
                 .then(async (res) => {
                     const lead = res?.data?.lead || res?.data || res;
                     const linkedProjectId = lead?.project_id;
+                    const lastCompletedStep = lead?.project_last_completed_step || 0;
 
-                    if (linkedProjectId) {
-                        // Lead already has a linked project — resume it
+                    if (linkedProjectId && lastCompletedStep >= 2) {
+                        // Lead already has a linked project AND step 2 was completed — resume it
                         try {
                             await resumeDraft(linkedProjectId);
                         } catch (e) {
@@ -284,8 +340,12 @@ export default function AddProject() {
                             setDraftReady(true);
                         }
                     } else {
-                        // No project yet — prefill step1 from lead details
+                        // No project yet, or step 2 not completed yet — prefill step1 and step2 from lead details
                         if (lead) {
+                            dispatch(resetForm());
+                            if (linkedProjectId) {
+                                dispatch(setProjectId(linkedProjectId));
+                            }
                             dispatch(
                                 updateStep1({
                                     projectName: lead.project_name || lead.projectName || "",
@@ -299,6 +359,43 @@ export default function AddProject() {
                                     responsiblePersonContact: (lead.contact_number || lead.phoneNumber || "").replace(/^\+91/, ""),
                                 }),
                             );
+
+                            const seen = new Set();
+                            let pts = lead.property_types || [];
+                            console.log("[Prefill API] Raw property_types from API response:", lead.property_types);
+                            if (typeof pts === 'string') {
+                                try {
+                                    pts = JSON.parse(pts);
+                                } catch (e) {
+                                    console.log("[Prefill API] Error parsing JSON string:", e);
+                                    pts = [];
+                                }
+                            }
+                            console.log("[Prefill API] Parsed property_types array:", pts);
+                            if (pts.length === 0 && (lead.property_category || lead.property_subtype)) {
+                                pts.push({
+                                    main_type: lead.property_category,
+                                    sub_type: lead.property_subtype,
+                                    configuration: lead.configuration
+                                });
+                            }
+
+                            console.log("[Prefill API] Final property_types to dispatch:", pts);
+                            pts.forEach((pt, index) => {
+                                if (!pt.main_type || !pt.sub_type) return;
+                                const mainType = String(pt.main_type).toLowerCase() === 'commercial' ? 'commercial' : 'residential';
+                                const subType = String(pt.sub_type).toLowerCase();
+                                const key = `${mainType}_${subType}`;
+                                if (!seen.has(key)) {
+                                    seen.add(key);
+                                    console.log(`[Prefill API] Dispatching addPropertyType for key: ${key}, mainType: ${mainType}, subType: ${subType}`);
+                                    dispatch(addPropertyType({
+                                        id: `lead_${mainType}_${subType}_${index}_${Math.random().toString(36).substring(2, 9)}`,
+                                        mainType,
+                                        subType
+                                    }));
+                                }
+                            });
                         }
                         dispatch(setStep(1));
                         setDraftReady(true);
@@ -427,8 +524,8 @@ export default function AddProject() {
             const typeMap = {};
 
             variants.forEach((v) => {
-                const mainType = v.property_type === 'commercial' ? 'commercial' : 'residential';
-                const subType  = v.property_subtype;
+                const mainType = String(v.property_type).toLowerCase() === 'commercial' ? 'commercial' : 'residential';
+                const subType  = String(v.property_subtype).toLowerCase();
                 const key      = `${mainType}_${subType}`;
                 if (!seen.has(key)) {
                     seen.add(key);
@@ -439,11 +536,13 @@ export default function AddProject() {
 
             if (variants.length === 0) {
                 (s2.property_types || []).forEach((pt) => {
-                    const key = `${pt.main_type}_${pt.sub_type}`;
+                    const mainType = String(pt.main_type).toLowerCase() === 'commercial' ? 'commercial' : 'residential';
+                    const subType  = String(pt.sub_type).toLowerCase();
+                    const key      = `${mainType}_${subType}`;
                     if (!seen.has(key)) {
                         seen.add(key);
-                        dispatch(addPropertyType({ id: `resume_${pt.main_type}_${pt.sub_type}`, mainType: pt.main_type, subType: pt.sub_type }));
-                        typeMap[pt.sub_type] = { mainType: pt.main_type, subType: pt.sub_type, typeId: `resume_${pt.main_type}_${pt.sub_type}` };
+                        dispatch(addPropertyType({ id: `resume_${mainType}_${subType}`, mainType, subType }));
+                        typeMap[subType] = { mainType, subType, typeId: `resume_${mainType}_${subType}` };
                     }
                 });
             }

@@ -5,6 +5,7 @@ const onboardingStages = [
     "Follow-up",
     "Meeting Scheduled",
     "Interested",
+    "In-Review",
     "Project live",
     "Rejected",
 ];
